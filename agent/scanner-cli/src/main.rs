@@ -20,11 +20,7 @@ use scanner_core::Quarantine;
 use runner::{EngineConfig, ScanParams};
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "talos",
-    version,
-    about = "Talos EPP — endpoint protection"
-)]
+#[command(name = "talos", version, about = "Talos EPP — endpoint protection")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
