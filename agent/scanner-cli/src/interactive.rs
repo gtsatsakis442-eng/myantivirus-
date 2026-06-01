@@ -166,7 +166,7 @@ fn menu() {
 
 fn about() {
     banner();
-    println!("Multi-layered detection: exact hash signatures + YARA rules.");
+    println!("Multi-layered detection: hash signatures + YARA + static heuristics.");
     println!("Detected files can be quarantined (isolated) and later restored.");
     println!("Roadmap layers — real-time kernel sensor, ML, cloud — live in docs/.");
 }

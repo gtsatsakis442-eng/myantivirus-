@@ -46,8 +46,12 @@ impl Engine {
             });
         }
 
-        if let (Some(engine), Some(bytes)) = (self.yara.as_ref(), content) {
-            detections.extend(engine.scan(bytes)?);
+        if let Some(bytes) = content {
+            if let Some(engine) = self.yara.as_ref() {
+                detections.extend(engine.scan(bytes)?);
+            }
+            // Static heuristics (L2) run on PE content; no-op for other files.
+            detections.extend(crate::heuristics::analyze(bytes));
         }
 
         Ok(detections)

@@ -72,10 +72,12 @@ This is a **defensive security product**. Everything here is intended for the
 
 ## Phase 1 — the app (`sentinel-scan.exe`)
 
-A standalone, installable endpoint-protection app. Detection layers today:
-exact **hash signatures** + **YARA**; detections can be **quarantined**
-(isolated) and restored. The ONNX static-ML layer is intentionally deferred
-until the file-processing pipeline is hardened (see `ml/`).
+A standalone, installable endpoint-protection app. Three detection layers
+today: exact **hash signatures**, **YARA** rules, and **static PE heuristics**
+(entropy/packing, process-injection imports, W^X sections — reported as
+*suspicious*, never auto-actioned). Detections can be **quarantined** (isolated)
+and restored. The ONNX static-ML layer is intentionally deferred until the
+file-processing pipeline is hardened (see `ml/`).
 
 **Get the Windows `.exe`:** download the `sentinel-installer` artifact from a
 green CI run (Actions → run → Artifacts), or push a `v*` tag to publish a
@@ -90,6 +92,7 @@ cargo test --all && cargo build --release
 ./target/release/sentinel-scan
 
 # Or drive it from the CLI:
+sentinel-scan selftest                              # verify detection works
 sentinel-scan scan --profile quick                 # scan high-risk folders
 sentinel-scan scan ./some/dir --quarantine         # scan + isolate threats
 sentinel-scan scan ./some/dir --json               # NDJSON telemetry (docs/07)

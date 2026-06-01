@@ -24,6 +24,7 @@
 pub mod engine;
 pub mod error;
 pub mod hashing;
+pub mod heuristics;
 pub mod pipeline;
 pub mod quarantine;
 pub mod report;

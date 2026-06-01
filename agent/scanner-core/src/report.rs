@@ -34,6 +34,10 @@ impl ScanReport {
         self.disposition == Disposition::Malicious
     }
 
+    pub fn is_suspicious(&self) -> bool {
+        self.disposition == Disposition::Suspicious
+    }
+
     /// Highest severity among detections, if any.
     pub fn top_severity(&self) -> Option<Severity> {
         self.detections.iter().map(|d| d.severity).max()
@@ -47,11 +51,7 @@ impl ScanReport {
         content_inspected: bool,
         start: Instant,
     ) -> Self {
-        let disposition = if detections.is_empty() {
-            Disposition::Clean
-        } else {
-            Disposition::Malicious
-        };
+        let disposition = Disposition::classify(&detections);
         Self {
             path: path.display().to_string(),
             size,
@@ -109,6 +109,7 @@ impl ScanReport {
 pub struct ScanSummary {
     pub files_scanned: u64,
     pub malicious: u64,
+    pub suspicious: u64,
     pub skipped: u64,
     pub errors: u64,
     pub bytes_scanned: u64,
@@ -127,6 +128,11 @@ impl ScanSummary {
                 self.files_scanned += 1;
                 self.bytes_scanned += report.size;
                 self.malicious += 1;
+            }
+            Disposition::Suspicious => {
+                self.files_scanned += 1;
+                self.bytes_scanned += report.size;
+                self.suspicious += 1;
             }
             Disposition::Skipped => self.skipped += 1,
             Disposition::Error => self.errors += 1,

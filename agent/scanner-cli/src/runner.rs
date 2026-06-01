@@ -119,9 +119,10 @@ pub fn quarantine_threats(threats: &[ScanReport], dir: &Path) -> Result<usize> {
 
 pub fn print_summary(summary: &ScanSummary) {
     eprintln!(
-        "\nscanned {} file(s), {} malicious, {} skipped, {} error(s) in {} ms",
+        "\nscanned {} file(s), {} malicious, {} suspicious, {} skipped, {} error(s) in {} ms",
         summary.files_scanned,
         summary.malicious,
+        summary.suspicious,
         summary.skipped,
         summary.errors,
         summary.duration_ms
@@ -138,6 +139,17 @@ fn print_human(report: &ScanReport, show_clean: bool) {
                     report.path,
                     d.name,
                     d.kind
+                );
+            }
+        }
+        Disposition::Suspicious => {
+            for d in &report.detections {
+                println!(
+                    "[SUSPECT] {} :: {} ({:?}, {})",
+                    report.path,
+                    d.name,
+                    d.kind,
+                    sev_label(d.severity).trim()
                 );
             }
         }
