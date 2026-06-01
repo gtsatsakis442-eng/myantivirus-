@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# One run per ref; cancel superseded runs (also avoids duplicate push+PR runs).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  scanner:
+    name: Scanner — build, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain (pinned by rust-toolchain.toml)
+        run: |
+          rustup show
+          rustup component add rustfmt clippy
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --all --locked
+
+      - name: Release build (Linux)
+        run: cargo build --release --locked
+
+  installer:
+    name: Installer + code-signing simulation
+    runs-on: windows-latest
+    needs: scanner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (release, windows-msvc)
+        run: cargo build --release --locked -p scanner-cli --target x86_64-pc-windows-msvc
+
+      - name: Build MSI (WiX 5)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          wix --version
+          Set-Location installer/wix
+          wix build Package.wxs -o sentinel-agent.msi
+          if (-not (Test-Path sentinel-agent.msi)) { throw "MSI was not produced" }
+
+      - name: Code-signing simulation (app .exe)
+        shell: pwsh
+        run: ./installer/sign/sign.ps1 -Mode simulate -Path "target/x86_64-pc-windows-msvc/release/sentinel-scan.exe"
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-installer
+          path: |
+            installer/wix/sentinel-agent.msi
+            target/x86_64-pc-windows-msvc/release/sentinel-scan.exe
+          if-no-files-found: error

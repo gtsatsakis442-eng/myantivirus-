@@ -1,0 +1,10 @@
+# Sentinel EPP — baseline hash-signature database
+# Format:  <sha256-hex>  <Family.Name>
+# Lines starting with '#' are comments; blank lines are ignored.
+#
+# This is seed/sample content for the Phase 1 MVP. Production signatures are
+# authored by Threat Research and delivered via the signed TUF update channel
+# (see docs/03-secure-updates.md), NOT hand-edited here.
+
+# EICAR standard anti-malware test file (harmless industry test vector).
+275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f  Eicar.Test.File

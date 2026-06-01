@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "agent/scanner-core",
+    "agent/scanner-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Proprietary"
+authors = ["Sentinel EPP Team"]
+repository = "https://github.com/gtsatsakis442-eng/myantivirus-"
+
+# Optimize release builds for the scan hot-path.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

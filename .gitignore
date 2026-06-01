@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# WiX / installer build outputs
+*.msi
+*.exe
+*.wixpdb
+*.wixobj
+installer/**/obj/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Note: Cargo.lock IS committed (this workspace ships binaries).
