@@ -1,0 +1,5 @@
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+# Production targets Windows; core logic is cross-platform so we develop/test on Linux too.
+targets = ["x86_64-pc-windows-msvc"]

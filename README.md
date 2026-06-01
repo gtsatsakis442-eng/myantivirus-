@@ -51,8 +51,41 @@ This is a **defensive security product**. Everything here is intended for the
 | 04 | [Deployment & Distribution](docs/04-deployment-distribution.md) | Authenticode/EV signing, WHQL & attestation, ELAM entitlement, MSI/bootstrapper, silent AD/Intune/SCCM deployment, Defender coexistence |
 | 05 | [Compliance & Privacy](docs/05-compliance-privacy.md) | GDPR lawful basis, data minimization, residency, DPIA, retention, DSAR, certifications |
 | 06 | [Implementation Roadmap](docs/06-implementation-roadmap.md) | Phased plan (MVP → GA → EDR), org structure, tech stack, testing/QA, KPIs, risk register |
+| 07 | [Telemetry Flow ⟨FOR REVIEW⟩](docs/07-telemetry-flow.md) | The telemetry record, end-to-end flow, tiers, per-field PII assessment, privacy controls — **pending sign-off** |
 
 ---
+
+## Repository Layout
+
+```
+.
+├── docs/                  Architecture & roadmap (01–07)
+├── agent/                 User-mode agent (Rust workspace)
+│   ├── scanner-core/      Engine library: hashing, hash-sig DB, YARA, pipeline
+│   └── scanner-cli/       `sentinel-scan` CLI front-end
+├── signatures/            Seed detection content (hashes + high-fidelity YARA)
+├── installer/             WiX MSI + Burn bootstrapper + code-signing simulation
+├── kernel/                Phase 2 kernel sensor (placeholder)
+├── cloud/  ml/  tools/    Later-phase placeholders
+└── .github/workflows/     CI: Linux engine gates + Windows installer + signing sim
+```
+
+## Phase 1 Quickstart
+
+```bash
+# Build & test the engine (Linux/macOS/Windows — core logic is cross-platform)
+cargo test --all
+cargo build --release
+
+# Scan a path (human output)
+cargo run -p scanner-cli -- ./some/dir --show-clean
+
+# Structured telemetry (NDJSON — see docs/07)
+cargo run -p scanner-cli -- ./some/dir --json
+```
+Exit codes: `0` clean · `1` malicious detected · `2` error. Detection layers:
+exact **hash signatures** + **YARA**. The ONNX static-ML layer is intentionally
+deferred until the file-processing pipeline is hardened (see `ml/`).
 
 ## System-at-a-Glance
 
