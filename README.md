@@ -83,27 +83,41 @@ pipeline is hardened (see `ml/`).
 📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
 quarantine, troubleshooting.
 
-**Get the Windows `.exe`:** download the `talos-installer` artifact from a
-green CI run (Actions → run → Artifacts), or push a `v*` tag to publish a
-GitHub Release with `talos.exe` + `talos-agent.msi`. Or build it:
-`cargo build --release -p scanner-cli --target x86_64-pc-windows-msvc`.
+### Windows — get & run `talos.exe`
 
-```bash
-# Build & test (Linux/macOS/Windows — core logic is cross-platform)
-cargo test --all && cargo build --release
+**Option A — download the prebuilt app** (no toolchain needed). In PowerShell:
+```powershell
+# Easiest (works for private repos) — via the GitHub CLI:
+gh release download latest --repo gtsatsakis442-eng/myantivirus- --pattern talos.exe
 
-# Launch the interactive app (menu-driven; this is what double-clicking does)
-./target/release/talos
+# No gh? Grab it from the browser at Releases -> "latest", or:
+Invoke-WebRequest "https://github.com/gtsatsakis442-eng/myantivirus-/releases/download/latest/talos.exe" -OutFile talos.exe
 
-# Or drive it from the CLI:
-talos selftest                              # verify detection works
-talos scan --profile quick                 # scan high-risk folders
-talos scan ./some/dir --quarantine         # scan + isolate threats
-talos scan ./some/dir --json               # NDJSON telemetry (docs/07)
-talos quarantine list                       # review the vault
-talos quarantine restore <id>               # restore a false positive
+.\talos.exe            # launch the interactive console (or just double-click it)
+.\talos.exe selftest   # verify detection works (EICAR)
+```
+The enterprise installer `talos-agent.msi` is attached to the same release.
+
+**Option B — build it yourself** (PowerShell; needs the Rust toolchain):
+```powershell
+cargo test --all
+cargo build --release
+.\target\release\talos.exe selftest
+```
+
+**Drive it from the CLI** (Windows or Unix):
+```text
+talos scan --profile quick         # scan high-risk folders (Downloads, Temp, …)
+talos scan C:\Users\me\Downloads   # scan a specific path
+talos scan C:\path --quarantine    # scan + isolate detected threats
+talos scan C:\path --json          # NDJSON telemetry (see docs/07)
+talos quarantine list              # review the vault
+talos quarantine restore <id>      # restore a false positive
 ```
 Exit codes: `0` clean · `1` threat detected · `2` error.
+
+> The build is **unsigned**, so Windows SmartScreen shows an "Unknown Publisher"
+> prompt (click *More info → Run anyway*) until the EV certificate is applied.
 
 ## System-at-a-Glance
 
