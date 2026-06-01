@@ -1,6 +1,6 @@
 [package]
 name = "scanner-core"
-description = "Sentinel EPP — user-mode scanning engine (hash signatures + YARA)"
+description = "Talos EPP — user-mode scanning engine (hash signatures + YARA)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

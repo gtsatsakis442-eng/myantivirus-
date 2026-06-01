@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Sentinel EPP — Burn bootstrapper that produces the single standalone .exe the
+  Talos EPP — Burn bootstrapper that produces the single standalone .exe the
   product is distributed as. It chains prerequisites (e.g., VC++ redist, and in
   Phase 2 the WHQL-signed driver) and the MSI, passing silent-config through.
 
   Requires the BAL extension:
      wix extension add -g WixToolset.Bal.wixext
-     wix build Bundle.wxs -ext WixToolset.Bal.wixext -o sentinel-setup.exe
+     wix build Bundle.wxs -ext WixToolset.Bal.wixext -o talos-setup.exe
 
   Built/signed in the release pipeline (not the per-commit CI) — see
   installer/README and docs/04-deployment-distribution.md.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
-  <Bundle Name="Sentinel EPP"
-          Manufacturer="Sentinel Security"
+  <Bundle Name="Talos EPP"
+          Manufacturer="Talos Security"
           Version="0.1.0"
           UpgradeCode="C3D5E7F9-2A4B-6C8D-0E1F-3A5B7C9D1E20">
 
@@ -24,7 +24,7 @@
 
     <Chain>
       <!-- Vc++ redist and the Phase 2 driver package would be chained here. -->
-      <MsiPackage Id="SentinelAgent" SourceFile="sentinel-agent.msi" Vital="yes" Visible="no">
+      <MsiPackage Id="TalosAgent" SourceFile="talos-agent.msi" Vital="yes" Visible="no">
         <MsiProperty Name="TENANT_TOKEN" Value="[TENANT_TOKEN]" />
         <MsiProperty Name="SERVER" Value="[SERVER]" />
         <MsiProperty Name="UPDATE_RING" Value="[UPDATE_RING]" />

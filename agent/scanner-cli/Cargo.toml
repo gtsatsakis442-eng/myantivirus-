@@ -1,6 +1,6 @@
 [package]
 name = "scanner-cli"
-description = "Sentinel EPP — command-line scanner front-end"
+description = "Talos EPP — command-line scanner front-end"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "sentinel-scan"
+name = "talos"
 path = "src/main.rs"
 
 [dependencies]

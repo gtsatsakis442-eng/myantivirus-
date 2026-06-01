@@ -1,4 +1,4 @@
-# Sentinel EPP — User Guide
+# Talos EPP — User Guide
 
 A practical guide to installing and running the Phase 1 app. For the broader
 architecture, see [the docs index](../README.md#document-index).
@@ -11,7 +11,7 @@ architecture, see [the docs index](../README.md#document-index).
 
 ## 1. What it does
 
-Sentinel scans files and flags threats using three layers:
+Talos scans files and flags threats using three layers:
 
 | Layer | What it catches | Verdict |
 |---|---|---|
@@ -30,9 +30,9 @@ files and later **restore** them.
 
 ## 2. Get the app
 
-**Option A — download the built binary (Windows):** grab the `sentinel-installer`
+**Option A — download the built binary (Windows):** grab the `talos-installer`
 artifact from a green CI run (GitHub → **Actions** → latest run on `main` →
-**Artifacts**). It contains `sentinel-scan.exe` and `sentinel-agent.msi`.
+**Artifacts**). It contains `talos.exe` and `talos-agent.msi`.
 
 **Option B — build it yourself:**
 ```bash
@@ -40,11 +40,11 @@ cargo build --release                                   # current platform
 cargo build --release -p scanner-cli \
   --target x86_64-pc-windows-msvc                        # Windows .exe
 ```
-The binary is `target/release/sentinel-scan` (`.exe` on Windows).
+The binary is `target/release/talos` (`.exe` on Windows).
 
 **Enterprise install (MSI, silent):**
 ```bat
-msiexec /i sentinel-agent.msi /qn /norestart TENANT_TOKEN=... UPDATE_RING=delayed
+msiexec /i talos-agent.msi /qn /norestart TENANT_TOKEN=... UPDATE_RING=delayed
 ```
 See [deployment](04-deployment-distribution.md) for GPO/Intune/SCCM.
 
@@ -55,29 +55,29 @@ See [deployment](04-deployment-distribution.md) for GPO/Intune/SCCM.
 ### Interactive app (easiest)
 Run with **no arguments** (or double-click the `.exe`):
 ```bash
-sentinel-scan
+talos
 ```
 You get a menu: **Quick Scan**, **Full Scan**, **Custom Scan**, **Quarantine**
 manager, **Update info**, **About**, and **Help**.
 
 ### Command line
 ```bash
-sentinel-scan selftest                      # verify detection works (EICAR)
-sentinel-scan scan --profile quick          # scan high-risk folders
-sentinel-scan scan --profile full           # scan the whole system
-sentinel-scan scan /path/to/dir             # scan a specific path
-sentinel-scan scan /path --quarantine       # scan and isolate threats
-sentinel-scan scan /path --json             # NDJSON output (one report/line)
-sentinel-scan scan /path --show-clean       # also list clean files
+talos selftest                      # verify detection works (EICAR)
+talos scan --profile quick          # scan high-risk folders
+talos scan --profile full           # scan the whole system
+talos scan /path/to/dir             # scan a specific path
+talos scan /path --quarantine       # scan and isolate threats
+talos scan /path --json             # NDJSON output (one report/line)
+talos scan /path --show-clean       # also list clean files
 ```
 
 ### Quarantine management
 ```bash
-sentinel-scan quarantine list               # show isolated items + ids
-sentinel-scan quarantine restore <id>       # put a file back (false positive)
-sentinel-scan quarantine restore <id> --to /some/dir/file
-sentinel-scan quarantine purge <id>         # delete one item permanently
-sentinel-scan quarantine purge --all        # empty the vault
+talos quarantine list               # show isolated items + ids
+talos quarantine restore <id>       # put a file back (false positive)
+talos quarantine restore <id> --to /some/dir/file
+talos quarantine purge <id>         # delete one item permanently
+talos quarantine purge --all        # empty the vault
 ```
 
 ---
@@ -104,7 +104,7 @@ sentinel-scan quarantine purge --all        # empty the vault
 | What | Location |
 |---|---|
 | Signatures (hash DB + YARA) | next to the exe under `signatures/`, else `./signatures` |
-| Quarantine vault | `%PROGRAMDATA%\Sentinel EPP\quarantine` (Windows) or `~/.local/share/sentinel-epp/quarantine` |
+| Quarantine vault | `%PROGRAMDATA%\Talos EPP\quarantine` (Windows) or `~/.local/share/talos-epp/quarantine` |
 
 Override the quarantine location with `scan --quarantine-dir <dir>` or
 `quarantine --dir <dir>`.
@@ -115,7 +115,7 @@ Override the quarantine location with `scan --quarantine-dir <dir>` or
 
 In this phase, signatures ship with the app. Production updates flow over the
 secure, staged channel (delta + TUF integrity, 48h baseline + emergency push) —
-see [docs/03](03-secure-updates.md). Run `sentinel-scan update` for a summary.
+see [docs/03](03-secure-updates.md). Run `talos update` for a summary.
 
 ---
 
@@ -124,8 +124,8 @@ see [docs/03](03-secure-updates.md). Run `sentinel-scan update` for a summary.
 ```bash
 # Create the harmless EICAR test file and scan it — it must be detected.
 printf 'X5O!P%%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > eicar.com
-sentinel-scan scan eicar.com         # -> [CRIT] ... Eicar.Test.File ; exit code 1
-sentinel-scan selftest               # -> SELFTEST PASSED
+talos scan eicar.com         # -> [CRIT] ... Eicar.Test.File ; exit code 1
+talos selftest               # -> SELFTEST PASSED
 ```
 
 ---

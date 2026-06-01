@@ -14,21 +14,21 @@ cargo build --release -p scanner-cli --target x86_64-pc-windows-msvc
 
 # 2. Build the MSI (core WiX, no extensions needed)
 cd installer/wix
-wix build Package.wxs -o sentinel-agent.msi
+wix build Package.wxs -o talos-agent.msi
 
 # 3. (release pipeline) Wrap into the standalone .exe
 wix extension add -g WixToolset.Bal.wixext
-wix build Bundle.wxs -ext WixToolset.Bal.wixext -o sentinel-setup.exe
+wix build Bundle.wxs -ext WixToolset.Bal.wixext -o talos-setup.exe
 ```
 
 ## Silent deployment (Active Directory)
 
 ```bat
 :: Zero-touch enrollment via MSI properties (GPO/SCCM/Intune)
-msiexec /i sentinel-agent.msi /qn /norestart ^
+msiexec /i talos-agent.msi /qn /norestart ^
         TENANT_TOKEN=abc123 SERVER=https://cloud.example UPDATE_RING=delayed
 ```
-Config is written to `HKLM\SOFTWARE\Sentinel EPP`. See
+Config is written to `HKLM\SOFTWARE\Talos EPP`. See
 [docs/04-deployment-distribution.md](../docs/04-deployment-distribution.md) for
 GPO/Intune/SCCM patterns and rollout rings.
 
@@ -47,7 +47,7 @@ GPO/Intune/SCCM patterns and rollout rings.
   [docs/04](../docs/04-deployment-distribution.md) §1.
 
 ```powershell
-pwsh ./installer/sign/sign.ps1 -Mode simulate -Path sentinel-scan.exe, sentinel-agent.msi
+pwsh ./installer/sign/sign.ps1 -Mode simulate -Path talos.exe, talos-agent.msi
 ```
 
 > Production driver signing (WHQL/attestation) and the ELAM/PPL entitlement are

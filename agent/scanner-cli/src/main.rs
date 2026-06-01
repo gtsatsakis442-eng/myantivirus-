@@ -1,4 +1,4 @@
-//! Sentinel EPP — endpoint protection app (Phase 1 MVP).
+//! Talos EPP — endpoint protection app (Phase 1 MVP).
 //!
 //! Launched with **no arguments** it opens the interactive app (menu-driven).
 //! Subcommands provide automation. Exit codes (clamscan-compatible):
@@ -21,9 +21,9 @@ use runner::{EngineConfig, ScanParams};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "sentinel-scan",
+    name = "talos",
     version,
-    about = "Sentinel EPP — endpoint protection"
+    about = "Talos EPP — endpoint protection"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -137,7 +137,7 @@ fn cmd_selftest() -> ExitCode {
         let (engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
         println!("engine: {hash_count} hash signature(s), {yara_files} YARA file(s)");
 
-        let dir = std::env::temp_dir().join(format!("sentinel-selftest-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("talos-selftest-{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         let sample = dir.join("eicar-selftest.com");
         std::fs::write(&sample, EICAR)?;
@@ -178,7 +178,7 @@ fn cmd_scan(args: ScanArgs) -> ExitCode {
         };
         let (engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
         if !args.json {
-            eprintln!("sentinel: {hash_count} hash signature(s), {yara_files} YARA file(s)");
+            eprintln!("talos: {hash_count} hash signature(s), {yara_files} YARA file(s)");
         }
 
         let params = ScanParams {

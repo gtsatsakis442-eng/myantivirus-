@@ -63,7 +63,7 @@ fn dashboard(info: &AgentInfo) {
     let state = agent::AgentState::load();
 
     ui::section("Agent Status");
-    ui::kv("Product", &ui::bold("Sentinel EPP — Enterprise"));
+    ui::kv("Product", &ui::bold("Talos EPP — Enterprise"));
     ui::kv("Version", &info.version);
 
     let management = if info.managed() {

@@ -1,5 +1,5 @@
 /*
- * Sentinel EPP — malicious PowerShell patterns (high-fidelity).
+ * Talos EPP — malicious PowerShell patterns (high-fidelity).
  * These target hallmark offensive tradecraft strings that are extremely rare
  * in legitimate scripts; conditions are anchored and size-bounded.
  */
@@ -7,7 +7,7 @@
 rule PowerShell_Download_Cradle
 {
     meta:
-        author      = "Sentinel Threat Research"
+        author      = "Talos Threat Research"
         description = "PowerShell in-memory download-and-execute cradle"
         severity    = "high"
         reference   = "MITRE ATT&CK T1059.001 / T1105"
@@ -24,7 +24,7 @@ rule PowerShell_Download_Cradle
 rule PowerShell_AMSI_Bypass
 {
     meta:
-        author      = "Sentinel Threat Research"
+        author      = "Talos Threat Research"
         description = "PowerShell AMSI bypass via amsiInitFailed reflection"
         severity    = "high"
         reference   = "MITRE ATT&CK T1562.001 (Impair Defenses)"
@@ -39,7 +39,7 @@ rule PowerShell_AMSI_Bypass
 rule PowerShell_EncodedCommand
 {
     meta:
-        author      = "Sentinel Threat Research"
+        author      = "Talos Threat Research"
         description = "PowerShell launched with a base64 -EncodedCommand payload"
         severity    = "medium"
         reference   = "MITRE ATT&CK T1027 / T1059.001"

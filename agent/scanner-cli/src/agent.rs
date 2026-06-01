@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::paths;
 
 /// Management/enrollment info, sourced from the environment (in production the
-/// MSI provisions these into `HKLM\SOFTWARE\Sentinel EPP`; we read the mirrored
-/// `SENTINEL_*` variables here so the console works cross-platform).
+/// MSI provisions these into `HKLM\SOFTWARE\Talos EPP`; we read the mirrored
+/// `TALOS_*` variables here so the console works cross-platform).
 pub struct AgentInfo {
     pub version: String,
     pub tenant: Option<String>,
@@ -22,9 +22,9 @@ impl AgentInfo {
         let env = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty());
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            tenant: env("SENTINEL_TENANT"),
-            server: env("SENTINEL_SERVER"),
-            update_ring: env("SENTINEL_RING").unwrap_or_else(|| "stable".to_string()),
+            tenant: env("TALOS_TENANT"),
+            server: env("TALOS_SERVER"),
+            update_ring: env("TALOS_RING").unwrap_or_else(|| "stable".to_string()),
         }
     }
 

@@ -32,15 +32,15 @@ pub fn default_rules() -> PathBuf {
 /// Per-machine data directory (quarantine store, logs).
 pub fn data_dir() -> PathBuf {
     if let Ok(pd) = std::env::var("PROGRAMDATA") {
-        return PathBuf::from(pd).join("Sentinel EPP");
+        return PathBuf::from(pd).join("Talos EPP");
     }
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home)
             .join(".local")
             .join("share")
-            .join("sentinel-epp");
+            .join("talos-epp");
     }
-    std::env::temp_dir().join("sentinel-epp")
+    std::env::temp_dir().join("talos-epp")
 }
 
 pub fn default_quarantine_dir() -> PathBuf {

@@ -1,5 +1,5 @@
 /*
- * Sentinel EPP — test-vector rules.
+ * Talos EPP — test-vector rules.
  * High-fidelity: the EICAR string is a standardized test token that does not
  * occur in legitimate software outside of AV testing.
  */
@@ -7,7 +7,7 @@
 rule EICAR_Test_File
 {
     meta:
-        author      = "Sentinel Threat Research"
+        author      = "Talos Threat Research"
         description = "EICAR standard anti-malware test file (NOT real malware)"
         severity    = "low"
         reference   = "https://www.eicar.org/download-anti-malware-testfile/"

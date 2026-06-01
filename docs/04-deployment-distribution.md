@@ -75,12 +75,12 @@ Microsoft**; a vendor EV signature alone is not loadable for new drivers.
 
 ### 3.2 Install behavior
 - **Silent / unattended:** `/quiet /norestart` (bootstrapper) and
-  `msiexec /i Sentinel.msi /qn /norestart` (MSI).
+  `msiexec /i Talos.msi /qn /norestart` (MSI).
 - **Configuration via MSI properties** (so deployment tools can parameterize):
   - `TENANT_TOKEN=…` (auto-enroll the agent to the right cloud tenant),
   - `SERVER=…`, `UPDATE_RING=…`, `PROXY=…`, `TELEMETRY_LEVEL=…`.
   - Example:
-    `msiexec /i Sentinel.msi /qn /norestart TENANT_TOKEN=abc123 UPDATE_RING=delayed`
+    `msiexec /i Talos.msi /qn /norestart TENANT_TOKEN=abc123 UPDATE_RING=delayed`
 - **`.mst` transforms** for per-site config without re-packaging.
 - **Reboot handling:** driver/ELAM ideally load without reboot; where a reboot
   is required, defer with `/norestart` and let the deployment tool schedule it.

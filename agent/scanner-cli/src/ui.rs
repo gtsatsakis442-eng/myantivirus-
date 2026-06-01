@@ -45,7 +45,7 @@ const INNER: usize = 56;
 
 /// Render the branded, boxed product header.
 pub fn banner(version: &str) {
-    let title = "SENTINEL EPP  —  Endpoint Protection Platform";
+    let title = "TALOS EPP  —  Endpoint Protection Platform";
     let sub = format!("Enterprise Edition  ·  v{version}");
     println!("{}", cyan(&format!("┌{}┐", "─".repeat(INNER + 2))));
     println!("{}", bold(&framed(title)));
