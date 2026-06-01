@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Sentinel EPP code-signing abstraction.
+    Talos EPP code-signing abstraction.
 
 .DESCRIPTION
     One entry point for signing build artifacts, with two modes:
@@ -39,12 +39,12 @@ if ($Mode -eq 'production') {
           "It is intentionally unavailable in CI (see docs/04-deployment-distribution.md)."
 }
 
-Write-Host "=== Sentinel code-signing SIMULATION (non-production, self-signed) ==="
+Write-Host "=== Talos code-signing SIMULATION (non-production, self-signed) ==="
 
 # 1. Create a throwaway code-signing certificate.
 $cert = New-SelfSignedCertificate `
     -Type CodeSigningCert `
-    -Subject 'CN=Sentinel EPP CI Test Signing (DO NOT TRUST)' `
+    -Subject 'CN=Talos EPP CI Test Signing (DO NOT TRUST)' `
     -CertStoreLocation 'Cert:\CurrentUser\My' `
     -KeyExportPolicy Exportable `
     -KeyUsage DigitalSignature `

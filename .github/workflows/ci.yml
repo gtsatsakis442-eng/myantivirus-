@@ -65,18 +65,18 @@ jobs:
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
           wix --version
           Set-Location installer/wix
-          wix build Package.wxs -o sentinel-agent.msi
-          if (-not (Test-Path sentinel-agent.msi)) { throw "MSI was not produced" }
+          wix build Package.wxs -o talos-agent.msi
+          if (-not (Test-Path talos-agent.msi)) { throw "MSI was not produced" }
 
       - name: Code-signing simulation (app .exe)
         shell: pwsh
-        run: ./installer/sign/sign.ps1 -Mode simulate -Path "target/x86_64-pc-windows-msvc/release/sentinel-scan.exe"
+        run: ./installer/sign/sign.ps1 -Mode simulate -Path "target/x86_64-pc-windows-msvc/release/talos.exe"
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sentinel-installer
+          name: talos-installer
           path: |
-            installer/wix/sentinel-agent.msi
-            target/x86_64-pc-windows-msvc/release/sentinel-scan.exe
+            installer/wix/talos-agent.msi
+            target/x86_64-pc-windows-msvc/release/talos.exe
           if-no-files-found: error

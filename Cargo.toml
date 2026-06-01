@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "Proprietary"
-authors = ["Sentinel EPP Team"]
+authors = ["Talos EPP Team"]
 repository = "https://github.com/gtsatsakis442-eng/myantivirus-"
 
 # Optimize release builds for the scan hot-path.

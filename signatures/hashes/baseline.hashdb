@@ -1,4 +1,4 @@
-# Sentinel EPP — baseline hash-signature database
+# Talos EPP — baseline hash-signature database
 # Format:  <sha256-hex>  <Family.Name>
 # Lines starting with '#' are comments; blank lines are ignored.
 #

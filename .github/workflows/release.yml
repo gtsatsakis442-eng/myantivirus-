@@ -1,9 +1,14 @@
 name: Release
 
-# Push a tag like v0.1.0 to build and publish the Windows app + installer.
+# Produces a downloadable Windows build:
+#  * push to main  -> updates a rolling "latest" pre-release (talos.exe + MSI)
+#  * tag v*        -> a versioned release
+#  * manual run    -> same as latest (Actions tab -> Run workflow)
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,21 +28,52 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
           Set-Location installer/wix
-          wix build Package.wxs -o sentinel-agent.msi
+          wix build Package.wxs -o talos-agent.msi
 
-      - name: Stage release artifacts
+      - name: Stage artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/x86_64-pc-windows-msvc/release/sentinel-scan.exe dist/
-          Copy-Item installer/wix/sentinel-agent.msi dist/
-          # Production signing (EV cert in HSM) runs here on the hardened signing
-          # host: ./installer/sign/sign.ps1 -Mode production -Path dist/*.exe,dist/*.msi
+          Copy-Item target/x86_64-pc-windows-msvc/release/talos.exe dist/talos.exe
+          Copy-Item installer/wix/talos-agent.msi dist/talos-agent.msi
+          # Production signing (EV cert in an HSM) would run here on the hardened
+          # signing host: ./installer/sign/sign.ps1 -Mode production -Path dist/*
 
-      - name: Publish GitHub Release
+      - name: Also upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: talos-windows
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish versioned release (tags)
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/sentinel-scan.exe
-            dist/sentinel-agent.msi
+            dist/talos.exe
+            dist/talos-agent.msi
           generate_release_notes: true
+
+      - name: Publish rolling "latest" release (main / manual)
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Talos EPP — latest build
+          prerelease: true
+          files: |
+            dist/talos.exe
+            dist/talos-agent.msi
+          body: |
+            **Rolling pre-release built from `main`.**
+
+            Download **`talos.exe`** (the standalone app) or **`talos-agent.msi`**
+            (the enterprise installer).
+
+            Run it: double-click `talos.exe` for the interactive console, or
+            `talos selftest` from a terminal to verify detection.
+
+            > Not production-signed yet — Windows SmartScreen will show an
+            > "Unknown Publisher" prompt until the EV certificate is applied
+            > (see docs/04-deployment-distribution.md).

@@ -1,5 +1,5 @@
 /*
- * Sentinel EPP — web shell detection (illustrative, high-fidelity).
+ * Talos EPP — web shell detection (illustrative, high-fidelity).
  * These rules target tight, low-false-positive patterns. They are examples of
  * the authoring standard (see README.md), not an exhaustive ruleset.
  */
@@ -7,7 +7,7 @@
 rule PHP_WebShell_Eval_Request
 {
     meta:
-        author      = "Sentinel Threat Research"
+        author      = "Talos Threat Research"
         description = "PHP one-liner web shell: eval()/assert() of request input"
         severity    = "high"
         reference   = "MITRE ATT&CK T1505.003 (Server Software Component: Web Shell)"
@@ -25,7 +25,7 @@ rule PHP_WebShell_Eval_Request
 rule PHP_WebShell_System_Request
 {
     meta:
-        author      = "Sentinel Threat Research"
+        author      = "Talos Threat Research"
         description = "PHP web shell: shell command execution of request input"
         severity    = "high"
         reference   = "MITRE ATT&CK T1505.003"

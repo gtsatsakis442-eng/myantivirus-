@@ -1,4 +1,4 @@
-//! Sentinel EPP — user-mode scanning engine (Phase 1 MVP).
+//! Talos EPP — user-mode scanning engine (Phase 1 MVP).
 //!
 //! This crate provides the file-processing pipeline and two detection layers:
 //! an exact **hash-signature** database and a **YARA** rule engine. It is
@@ -21,9 +21,11 @@
 //! # Ok::<(), scanner_core::ScanError>(())
 //! ```
 
+pub mod archive;
 pub mod engine;
 pub mod error;
 pub mod hashing;
+pub mod heuristics;
 pub mod pipeline;
 pub mod quarantine;
 pub mod report;
@@ -31,6 +33,7 @@ pub mod signatures;
 pub mod verdict;
 pub mod yara_engine;
 
+pub use archive::ArchiveLimits;
 pub use engine::Engine;
 pub use error::{Result, ScanError};
 pub use hashing::{hash_bytes, hash_reader, FileHashes};

@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Sentinel EPP Agent — MSI definition (WiX v4/v5).
+  Talos EPP Agent — MSI definition (WiX v4/v5).
 
   This is the enterprise deployment artifact (GPO/SCCM/Intune expect an MSI).
   Silent install:
-     msiexec /i sentinel-agent.msi /qn /norestart TENANT_TOKEN=xxx UPDATE_RING=delayed
+     msiexec /i talos-agent.msi /qn /norestart TENANT_TOKEN=xxx UPDATE_RING=delayed
   Built in CI on a Windows runner (see .github/workflows/ci.yml); the scanner
   binary must be compiled to the windows target first.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-      Name="Sentinel EPP Agent"
-      Manufacturer="Sentinel Security"
+      Name="Talos EPP Agent"
+      Manufacturer="Talos Security"
       Version="0.1.0"
       UpgradeCode="6B5F9C2E-2D1A-4E3B-9C7A-1F2E3D4C5B6A"
       Scope="perMachine"
       InstallerVersion="500"
       Compressed="yes">
 
-    <SummaryInformation Description="Sentinel EPP Agent (Phase 1 MVP)" />
+    <SummaryInformation Description="Talos EPP Agent (Phase 1 MVP)" />
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
@@ -26,11 +26,11 @@
     <!-- Silent-deployment configuration, set via msiexec properties or an MST
          transform. These flow into HKLM for the agent to read on first run. -->
     <Property Id="TENANT_TOKEN" Secure="yes" />
-    <Property Id="SERVER" Value="https://cloud.sentinel.example" Secure="yes" />
+    <Property Id="SERVER" Value="https://cloud.talos.example" Secure="yes" />
     <Property Id="UPDATE_RING" Value="stable" Secure="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Sentinel EPP">
+      <Directory Id="INSTALLFOLDER" Name="Talos EPP">
         <Directory Id="SIGDIR" Name="signatures">
           <Directory Id="SIGHASH" Name="hashes" />
           <Directory Id="SIGYARA" Name="yara" />
@@ -38,14 +38,14 @@
       </Directory>
     </StandardDirectory>
 
-    <Feature Id="Main" Title="Sentinel EPP Agent" Level="1">
+    <Feature Id="Main" Title="Talos EPP Agent" Level="1">
       <ComponentGroupRef Id="AgentComponents" />
     </Feature>
 
     <ComponentGroup Id="AgentComponents">
       <Component Directory="INSTALLFOLDER">
         <File Id="ScannerExe"
-              Source="$(sys.SOURCEFILEDIR)..\..\target\x86_64-pc-windows-msvc\release\sentinel-scan.exe"
+              Source="$(sys.SOURCEFILEDIR)..\..\target\x86_64-pc-windows-msvc\release\talos.exe"
               KeyPath="yes" />
       </Component>
 
@@ -62,7 +62,7 @@
       <!-- Persist enrollment/config from the silent-install properties so the
            agent auto-enrolls to the correct tenant on first check-in. -->
       <Component Directory="INSTALLFOLDER" Guid="A2C4E6F8-1B3D-5F7A-9C0E-2D4F6A8C0E11">
-        <RegistryKey Root="HKLM" Key="SOFTWARE\Sentinel EPP">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Talos EPP">
           <RegistryValue Name="TenantToken" Type="string" Value="[TENANT_TOKEN]" KeyPath="yes" />
           <RegistryValue Name="Server" Type="string" Value="[SERVER]" />
           <RegistryValue Name="UpdateRing" Type="string" Value="[UPDATE_RING]" />
@@ -73,7 +73,7 @@
 
     <!--
       Phase 2 adds the kernel sensor + a launch-protected Windows service here:
-        <ServiceInstall Name="SentinelAgent" Start="auto" Type="ownProcess" .../>
+        <ServiceInstall Name="TalosAgent" Start="auto" Type="ownProcess" .../>
       registered as anti-malware PPL anchored by the ELAM driver.
       See docs/01-core-architecture.md and docs/04-deployment-distribution.md.
     -->

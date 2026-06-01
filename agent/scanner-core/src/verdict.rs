@@ -33,6 +33,8 @@ pub enum DetectionKind {
     HashSignature,
     /// Match of a compiled YARA rule.
     YaraRule,
+    /// A static heuristic signal (suspicious, not by itself definitive).
+    Heuristic,
 }
 
 /// A single finding against an artifact.
@@ -50,10 +52,32 @@ pub struct Detection {
 pub enum Disposition {
     /// No detections.
     Clean,
-    /// One or more detections.
+    /// At least one high-confidence detection (hash or YARA).
     Malicious,
+    /// Only heuristic suspicion signals — flagged but not auto-actioned.
+    Suspicious,
     /// Intentionally not scanned (e.g., symlink, non-regular file).
     Skipped,
     /// Could not be scanned due to an error.
     Error,
+}
+
+impl Disposition {
+    /// Classify a set of detections: a hash/YARA hit is `Malicious`;
+    /// heuristic-only findings are `Suspicious`; none is `Clean`.
+    pub fn classify(detections: &[Detection]) -> Disposition {
+        if detections.is_empty() {
+            return Disposition::Clean;
+        }
+        if detections.iter().any(|d| {
+            matches!(
+                d.kind,
+                DetectionKind::HashSignature | DetectionKind::YaraRule
+            )
+        }) {
+            Disposition::Malicious
+        } else {
+            Disposition::Suspicious
+        }
+    }
 }

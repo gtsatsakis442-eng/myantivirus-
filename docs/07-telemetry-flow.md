@@ -9,7 +9,7 @@
 ## 1. The telemetry record (today, in code)
 
 The scanner emits one record per inspected artifact. This is the literal NDJSON
-produced by `sentinel-scan --json` against an EICAR test file:
+produced by `talos --json` against an EICAR test file:
 
 ```json
 {

@@ -1,4 +1,4 @@
-# Sentinel EPP — Enterprise Endpoint Protection Platform
+# Talos EPP — Enterprise Endpoint Protection Platform
 
 > **Status:** Architecture & Roadmap (Design Phase — no production code yet)
 > **Target:** Standalone, EV-signed Windows executable + WHQL-signed kernel sensor
@@ -62,7 +62,7 @@ This is a **defensive security product**. Everything here is intended for the
 ├── docs/                  Architecture & roadmap (01–07)
 ├── agent/                 User-mode agent (Rust workspace)
 │   ├── scanner-core/      Engine library: hashing, hash-sig DB, YARA, pipeline, quarantine
-│   └── scanner-cli/       `sentinel-scan` app: interactive menu + scan/quarantine CLI
+│   └── scanner-cli/       `talos` app: interactive menu + scan/quarantine CLI
 ├── signatures/            Seed detection content (hashes + high-fidelity YARA)
 ├── installer/             WiX MSI + Burn bootstrapper + code-signing simulation
 ├── kernel/                Phase 2 kernel sensor (placeholder)
@@ -70,16 +70,22 @@ This is a **defensive security product**. Everything here is intended for the
 └── .github/workflows/     CI: Linux engine gates + Windows installer + signing sim
 ```
 
-## Phase 1 — the app (`sentinel-scan.exe`)
+## Phase 1 — the app (`talos.exe`)
 
-A standalone, installable endpoint-protection app. Detection layers today:
-exact **hash signatures** + **YARA**; detections can be **quarantined**
-(isolated) and restored. The ONNX static-ML layer is intentionally deferred
-until the file-processing pipeline is hardened (see `ml/`).
+A standalone, installable endpoint-protection app. Three detection layers
+today: exact **hash signatures**, **YARA** rules, and **static PE heuristics**
+(entropy/packing, process-injection imports, W^X sections — reported as
+*suspicious*, never auto-actioned). It also scans **inside ZIP archives**
+(zip-bomb-guarded). Detections can be **quarantined** (isolated) and restored.
+The ONNX static-ML layer is intentionally deferred until the file-processing
+pipeline is hardened (see `ml/`).
 
-**Get the Windows `.exe`:** download the `sentinel-installer` artifact from a
+📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
+quarantine, troubleshooting.
+
+**Get the Windows `.exe`:** download the `talos-installer` artifact from a
 green CI run (Actions → run → Artifacts), or push a `v*` tag to publish a
-GitHub Release with `sentinel-scan.exe` + `sentinel-agent.msi`. Or build it:
+GitHub Release with `talos.exe` + `talos-agent.msi`. Or build it:
 `cargo build --release -p scanner-cli --target x86_64-pc-windows-msvc`.
 
 ```bash
@@ -87,14 +93,15 @@ GitHub Release with `sentinel-scan.exe` + `sentinel-agent.msi`. Or build it:
 cargo test --all && cargo build --release
 
 # Launch the interactive app (menu-driven; this is what double-clicking does)
-./target/release/sentinel-scan
+./target/release/talos
 
 # Or drive it from the CLI:
-sentinel-scan scan --profile quick                 # scan high-risk folders
-sentinel-scan scan ./some/dir --quarantine         # scan + isolate threats
-sentinel-scan scan ./some/dir --json               # NDJSON telemetry (docs/07)
-sentinel-scan quarantine list                       # review the vault
-sentinel-scan quarantine restore <id>               # restore a false positive
+talos selftest                              # verify detection works
+talos scan --profile quick                 # scan high-risk folders
+talos scan ./some/dir --quarantine         # scan + isolate threats
+talos scan ./some/dir --json               # NDJSON telemetry (docs/07)
+talos quarantine list                       # review the vault
+talos quarantine restore <id>               # restore a false positive
 ```
 Exit codes: `0` clean · `1` threat detected · `2` error.
 

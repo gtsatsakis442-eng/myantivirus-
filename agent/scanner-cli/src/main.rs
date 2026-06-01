@@ -1,12 +1,14 @@
-//! Sentinel EPP — endpoint protection app (Phase 1 MVP).
+//! Talos EPP — endpoint protection app (Phase 1 MVP).
 //!
 //! Launched with **no arguments** it opens the interactive app (menu-driven).
 //! Subcommands provide automation. Exit codes (clamscan-compatible):
 //!   0 = clean, 1 = threat detected, 2 = error.
 
+mod agent;
 mod interactive;
 mod paths;
 mod runner;
+mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -18,11 +20,7 @@ use scanner_core::Quarantine;
 use runner::{EngineConfig, ScanParams};
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "sentinel-scan",
-    version,
-    about = "Sentinel EPP — endpoint protection"
-)]
+#[command(name = "talos", version, about = "Talos EPP — endpoint protection")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -42,6 +40,8 @@ enum Command {
     },
     /// Explain how signature updates are delivered.
     Update,
+    /// Self-test: scan an EICAR sample to verify detection works end-to-end.
+    Selftest,
 }
 
 #[derive(Args, Debug)]
@@ -116,6 +116,51 @@ fn main() -> ExitCode {
             print_update_info();
             ExitCode::SUCCESS
         }
+        Some(Command::Selftest) => cmd_selftest(),
+    }
+}
+
+/// EICAR standard anti-malware test string (harmless industry test vector).
+const EICAR: &[u8] = br#"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"#;
+
+fn cmd_selftest() -> ExitCode {
+    let result = (|| -> Result<bool> {
+        let cfg = EngineConfig {
+            hashes: paths::default_hashes(),
+            rules: paths::default_rules(),
+            no_yara: false,
+        };
+        let (engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
+        println!("engine: {hash_count} hash signature(s), {yara_files} YARA file(s)");
+
+        let dir = std::env::temp_dir().join(format!("talos-selftest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let sample = dir.join("eicar-selftest.com");
+        std::fs::write(&sample, EICAR)?;
+
+        let params = ScanParams {
+            json: false,
+            show_clean: false,
+            max_size_mib: 128,
+            follow_symlinks: false,
+        };
+        let outcome = runner::run_scan(&engine, std::slice::from_ref(&sample), &params);
+
+        let _ = std::fs::remove_file(&sample);
+        let _ = std::fs::remove_dir(&dir);
+        Ok(outcome.summary.malicious >= 1)
+    })();
+
+    match result {
+        Ok(true) => {
+            println!("SELFTEST PASSED — EICAR detected.");
+            ExitCode::SUCCESS
+        }
+        Ok(false) => {
+            eprintln!("SELFTEST FAILED — EICAR not detected!");
+            ExitCode::from(2)
+        }
+        Err(e) => fail(e),
     }
 }
 
@@ -129,7 +174,7 @@ fn cmd_scan(args: ScanArgs) -> ExitCode {
         };
         let (engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
         if !args.json {
-            eprintln!("sentinel: {hash_count} hash signature(s), {yara_files} YARA file(s)");
+            eprintln!("talos: {hash_count} hash signature(s), {yara_files} YARA file(s)");
         }
 
         let params = ScanParams {
@@ -139,6 +184,11 @@ fn cmd_scan(args: ScanArgs) -> ExitCode {
             follow_symlinks: args.follow_symlinks,
         };
         let outcome = runner::run_scan(&engine, &targets, &params);
+        agent::AgentState::record_scan(
+            outcome.summary.files_scanned,
+            outcome.summary.malicious,
+            outcome.summary.suspicious,
+        );
 
         if args.quarantine && !outcome.threats.is_empty() {
             let dir = args
