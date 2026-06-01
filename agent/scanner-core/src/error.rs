@@ -21,6 +21,10 @@ pub enum ScanError {
     /// YARA rule compilation or scanning failed.
     #[error("YARA error: {0}")]
     Yara(String),
+
+    /// A quarantine operation (isolate/restore/purge) failed.
+    #[error("quarantine error: {0}")]
+    Quarantine(String),
 }
 
 /// Convenience result alias used throughout the engine.

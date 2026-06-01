@@ -61,8 +61,8 @@ This is a **defensive security product**. Everything here is intended for the
 .
 ├── docs/                  Architecture & roadmap (01–07)
 ├── agent/                 User-mode agent (Rust workspace)
-│   ├── scanner-core/      Engine library: hashing, hash-sig DB, YARA, pipeline
-│   └── scanner-cli/       `sentinel-scan` CLI front-end
+│   ├── scanner-core/      Engine library: hashing, hash-sig DB, YARA, pipeline, quarantine
+│   └── scanner-cli/       `sentinel-scan` app: interactive menu + scan/quarantine CLI
 ├── signatures/            Seed detection content (hashes + high-fidelity YARA)
 ├── installer/             WiX MSI + Burn bootstrapper + code-signing simulation
 ├── kernel/                Phase 2 kernel sensor (placeholder)
@@ -70,22 +70,33 @@ This is a **defensive security product**. Everything here is intended for the
 └── .github/workflows/     CI: Linux engine gates + Windows installer + signing sim
 ```
 
-## Phase 1 Quickstart
+## Phase 1 — the app (`sentinel-scan.exe`)
+
+A standalone, installable endpoint-protection app. Detection layers today:
+exact **hash signatures** + **YARA**; detections can be **quarantined**
+(isolated) and restored. The ONNX static-ML layer is intentionally deferred
+until the file-processing pipeline is hardened (see `ml/`).
+
+**Get the Windows `.exe`:** download the `sentinel-installer` artifact from a
+green CI run (Actions → run → Artifacts), or push a `v*` tag to publish a
+GitHub Release with `sentinel-scan.exe` + `sentinel-agent.msi`. Or build it:
+`cargo build --release -p scanner-cli --target x86_64-pc-windows-msvc`.
 
 ```bash
-# Build & test the engine (Linux/macOS/Windows — core logic is cross-platform)
-cargo test --all
-cargo build --release
+# Build & test (Linux/macOS/Windows — core logic is cross-platform)
+cargo test --all && cargo build --release
 
-# Scan a path (human output)
-cargo run -p scanner-cli -- ./some/dir --show-clean
+# Launch the interactive app (menu-driven; this is what double-clicking does)
+./target/release/sentinel-scan
 
-# Structured telemetry (NDJSON — see docs/07)
-cargo run -p scanner-cli -- ./some/dir --json
+# Or drive it from the CLI:
+sentinel-scan scan --profile quick                 # scan high-risk folders
+sentinel-scan scan ./some/dir --quarantine         # scan + isolate threats
+sentinel-scan scan ./some/dir --json               # NDJSON telemetry (docs/07)
+sentinel-scan quarantine list                       # review the vault
+sentinel-scan quarantine restore <id>               # restore a false positive
 ```
-Exit codes: `0` clean · `1` malicious detected · `2` error. Detection layers:
-exact **hash signatures** + **YARA**. The ONNX static-ML layer is intentionally
-deferred until the file-processing pipeline is hardened (see `ml/`).
+Exit codes: `0` clean · `1` threat detected · `2` error.
 
 ## System-at-a-Glance
 

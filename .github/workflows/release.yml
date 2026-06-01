@@ -1,0 +1,43 @@
+name: Release
+
+# Push a tag like v0.1.0 to build and publish the Windows app + installer.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (release, windows-msvc)
+        run: cargo build --release --locked -p scanner-cli --target x86_64-pc-windows-msvc
+
+      - name: Build MSI (WiX 5)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          Set-Location installer/wix
+          wix build Package.wxs -o sentinel-agent.msi
+
+      - name: Stage release artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/sentinel-scan.exe dist/
+          Copy-Item installer/wix/sentinel-agent.msi dist/
+          # Production signing (EV cert in HSM) runs here on the hardened signing
+          # host: ./installer/sign/sign.ps1 -Mode production -Path dist/*.exe,dist/*.msi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/sentinel-scan.exe
+            dist/sentinel-agent.msi
+          generate_release_notes: true

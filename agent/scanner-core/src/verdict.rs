@@ -1,9 +1,9 @@
 //! Verdict primitives: severity, detections, and disposition.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Relative severity of a detection. Drives response policy downstream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Low,
@@ -26,7 +26,7 @@ impl Severity {
 }
 
 /// Which engine produced a detection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DetectionKind {
     /// Exact match against the known-bad hash database.
@@ -36,7 +36,7 @@ pub enum DetectionKind {
 }
 
 /// A single finding against an artifact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Detection {
     /// Signature family or YARA rule identifier.
     pub name: String,

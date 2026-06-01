@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main]
   pull_request:
     branches: [main]
+
+# One run per ref; cancel superseded runs (also avoids duplicate push+PR runs).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -50,28 +55,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Add Windows target
-        run: rustup target add x86_64-pc-windows-msvc
-
-      - name: Build scanner (release, windows-msvc)
+      - name: Build app (release, windows-msvc)
         run: cargo build --release --locked -p scanner-cli --target x86_64-pc-windows-msvc
 
-      - name: Install WiX
+      - name: Build MSI (WiX 5)
         shell: pwsh
         run: |
-          dotnet tool install --global wix
-          echo "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          dotnet tool install --global wix --version 5.0.2
+          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          wix --version
+          Set-Location installer/wix
+          wix build Package.wxs -o sentinel-agent.msi
+          if (-not (Test-Path sentinel-agent.msi)) { throw "MSI was not produced" }
 
-      - name: Build MSI
-        working-directory: installer/wix
-        run: wix build Package.wxs -o sentinel-agent.msi
-
-      - name: Code-signing simulation (catches signing issues early)
+      - name: Code-signing simulation (app .exe)
         shell: pwsh
-        run: |
-          ./installer/sign/sign.ps1 -Mode simulate -Path `
-            "target/x86_64-pc-windows-msvc/release/sentinel-scan.exe", `
-            "installer/wix/sentinel-agent.msi"
+        run: ./installer/sign/sign.ps1 -Mode simulate -Path "target/x86_64-pc-windows-msvc/release/sentinel-scan.exe"
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
