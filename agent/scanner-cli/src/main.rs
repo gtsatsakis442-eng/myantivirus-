@@ -4,9 +4,11 @@
 //! Subcommands provide automation. Exit codes (clamscan-compatible):
 //!   0 = clean, 1 = threat detected, 2 = error.
 
+mod agent;
 mod interactive;
 mod paths;
 mod runner;
+mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -186,6 +188,11 @@ fn cmd_scan(args: ScanArgs) -> ExitCode {
             follow_symlinks: args.follow_symlinks,
         };
         let outcome = runner::run_scan(&engine, &targets, &params);
+        agent::AgentState::record_scan(
+            outcome.summary.files_scanned,
+            outcome.summary.malicious,
+            outcome.summary.suspicious,
+        );
 
         if args.quarantine && !outcome.threats.is_empty() {
             let dir = args

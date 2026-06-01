@@ -10,6 +10,8 @@ use scanner_core::{
     Scanner, Severity, YaraEngine,
 };
 
+use crate::ui;
+
 /// Inputs needed to construct the detection engine.
 pub struct EngineConfig {
     pub hashes: PathBuf,
@@ -118,14 +120,19 @@ pub fn quarantine_threats(threats: &[ScanReport], dir: &Path) -> Result<usize> {
 }
 
 pub fn print_summary(summary: &ScanSummary) {
+    let malicious = if summary.malicious > 0 {
+        ui::red(&summary.malicious.to_string())
+    } else {
+        summary.malicious.to_string()
+    };
+    let suspicious = if summary.suspicious > 0 {
+        ui::yellow(&summary.suspicious.to_string())
+    } else {
+        summary.suspicious.to_string()
+    };
     eprintln!(
-        "\nscanned {} file(s), {} malicious, {} suspicious, {} skipped, {} error(s) in {} ms",
-        summary.files_scanned,
-        summary.malicious,
-        summary.suspicious,
-        summary.skipped,
-        summary.errors,
-        summary.duration_ms
+        "\nscanned {} file(s), {malicious} malicious, {suspicious} suspicious, {} skipped, {} error(s) in {} ms",
+        summary.files_scanned, summary.skipped, summary.errors, summary.duration_ms
     );
 }
 
@@ -135,7 +142,7 @@ fn print_human(report: &ScanReport, show_clean: bool) {
             for d in &report.detections {
                 println!(
                     "[{}] {} :: {} ({:?})",
-                    sev_label(d.severity),
+                    colored_sev(d.severity),
                     report.path,
                     d.name,
                     d.kind
@@ -145,37 +152,38 @@ fn print_human(report: &ScanReport, show_clean: bool) {
         Disposition::Suspicious => {
             for d in &report.detections {
                 println!(
-                    "[SUSPECT] {} :: {} ({:?}, {})",
+                    "[{}] {} :: {} ({:?})",
+                    ui::yellow("SUSPECT"),
                     report.path,
                     d.name,
-                    d.kind,
-                    sev_label(d.severity).trim()
+                    d.kind
                 );
             }
         }
         Disposition::Error => eprintln!(
-            "[error] {}: {}",
+            "[{}] {}: {}",
+            ui::red("error"),
             report.path,
             report.error.as_deref().unwrap_or("unknown error")
         ),
         Disposition::Skipped => {
             if show_clean {
-                println!("[skip ] {}", report.path);
+                println!("[{}] {}", ui::dim("skip "), report.path);
             }
         }
         Disposition::Clean => {
             if show_clean {
-                println!("[clean] {}", report.path);
+                println!("[{}] {}", ui::green("clean"), report.path);
             }
         }
     }
 }
 
-fn sev_label(s: Severity) -> &'static str {
+fn colored_sev(s: Severity) -> String {
     match s {
-        Severity::Low => "LOW ",
-        Severity::Medium => "MED ",
-        Severity::High => "HIGH",
-        Severity::Critical => "CRIT",
+        Severity::Low => ui::dim("LOW "),
+        Severity::Medium => ui::yellow("MED "),
+        Severity::High => ui::magenta("HIGH"),
+        Severity::Critical => ui::red("CRIT"),
     }
 }

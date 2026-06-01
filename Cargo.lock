@@ -1807,7 +1807,9 @@ dependencies = [
  "anyhow",
  "clap",
  "scanner-core",
+ "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
