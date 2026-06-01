@@ -25,6 +25,10 @@ pub enum ScanError {
     /// A quarantine operation (isolate/restore/purge) failed.
     #[error("quarantine error: {0}")]
     Quarantine(String),
+
+    /// An archive could not be opened or read.
+    #[error("archive error: {0}")]
+    Archive(String),
 }
 
 /// Convenience result alias used throughout the engine.

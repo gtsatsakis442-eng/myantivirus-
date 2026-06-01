@@ -38,6 +38,7 @@ pub fn run() -> Result<()> {
             "4" => quarantine_menu()?,
             "5" => update_info(),
             "6" => about(),
+            "7" => help(),
             "0" | "q" | "quit" | "exit" => {
                 println!("Goodbye.");
                 break;
@@ -161,6 +162,7 @@ fn menu() {
     println!("[4] Quarantine      (list / restore / purge)");
     println!("[5] Update info");
     println!("[6] About");
+    println!("[7] Help");
     println!("[0] Exit");
 }
 
@@ -169,6 +171,23 @@ fn about() {
     println!("Multi-layered detection: hash signatures + YARA + static heuristics.");
     println!("Detected files can be quarantined (isolated) and later restored.");
     println!("Roadmap layers — real-time kernel sensor, ML, cloud — live in docs/.");
+}
+
+fn help() {
+    println!("How to use Sentinel:");
+    println!("  1 Quick Scan  — scans Downloads, Desktop, Temp, AppData (fast).");
+    println!("  2 Full Scan   — scans the whole system (can take a while).");
+    println!("  3 Custom Scan — enter any file or folder path to scan.");
+    println!("  4 Quarantine  — review isolated threats; restore or delete them.");
+    println!();
+    println!("After a scan, malicious files can be quarantined (isolated). A");
+    println!("quarantined file is removed from its location and can be restored");
+    println!("later if it was a false positive. 'Suspicious' results (heuristics)");
+    println!("are shown for awareness but are never auto-removed.");
+    println!();
+    println!("It also scans inside .zip archives. Tip: try option 1 after running");
+    println!("the EICAR smoke test, or use the CLI: 'sentinel-scan selftest'.");
+    println!("For the full guide see docs/USAGE.md.");
 }
 
 fn update_info() {

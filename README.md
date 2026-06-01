@@ -75,9 +75,13 @@ This is a **defensive security product**. Everything here is intended for the
 A standalone, installable endpoint-protection app. Three detection layers
 today: exact **hash signatures**, **YARA** rules, and **static PE heuristics**
 (entropy/packing, process-injection imports, W^X sections — reported as
-*suspicious*, never auto-actioned). Detections can be **quarantined** (isolated)
-and restored. The ONNX static-ML layer is intentionally deferred until the
-file-processing pipeline is hardened (see `ml/`).
+*suspicious*, never auto-actioned). It also scans **inside ZIP archives**
+(zip-bomb-guarded). Detections can be **quarantined** (isolated) and restored.
+The ONNX static-ML layer is intentionally deferred until the file-processing
+pipeline is hardened (see `ml/`).
+
+📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
+quarantine, troubleshooting.
 
 **Get the Windows `.exe`:** download the `sentinel-installer` artifact from a
 green CI run (Actions → run → Artifacts), or push a `v*` tag to publish a

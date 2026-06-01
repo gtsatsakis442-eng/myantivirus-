@@ -21,6 +21,7 @@
 //! # Ok::<(), scanner_core::ScanError>(())
 //! ```
 
+pub mod archive;
 pub mod engine;
 pub mod error;
 pub mod hashing;
@@ -32,6 +33,7 @@ pub mod signatures;
 pub mod verdict;
 pub mod yara_engine;
 
+pub use archive::ArchiveLimits;
 pub use engine::Engine;
 pub use error::{Result, ScanError};
 pub use hashing::{hash_bytes, hash_reader, FileHashes};

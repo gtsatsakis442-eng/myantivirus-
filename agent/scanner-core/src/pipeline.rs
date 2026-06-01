@@ -14,9 +14,11 @@ use std::time::Instant;
 
 use walkdir::WalkDir;
 
+use crate::archive::{self, ArchiveLimits};
 use crate::engine::Engine;
 use crate::hashing::{hash_bytes, hash_reader, FileHashes};
 use crate::report::ScanReport;
+use crate::verdict::Detection;
 
 /// Default cap for loading a whole file into memory for content inspection.
 pub const DEFAULT_MAX_CONTENT_BYTES: u64 = 128 * 1024 * 1024; // 128 MiB
@@ -103,12 +105,20 @@ impl<'e> Scanner<'e> {
                 }
             };
 
-        match self.engine.evaluate(&hashes, content.as_deref()) {
-            Ok(detections) => {
-                ScanReport::completed(path, size, hashes, detections, content_inspected, start)
+        let mut detections = match self.engine.evaluate(&hashes, content.as_deref()) {
+            Ok(d) => d,
+            Err(e) => return ScanReport::errored(path, size, e.to_string(), start),
+        };
+
+        // If the file is a ZIP, scan its entries and fold any findings into this
+        // report (so an infected archive is flagged as the archive that it is).
+        if let Some(bytes) = content.as_deref() {
+            if archive::looks_like_zip(bytes) {
+                scan_archive_entries(self.engine, bytes, &mut detections);
             }
-            Err(e) => ScanReport::errored(path, size, e.to_string(), start),
         }
+
+        ScanReport::completed(path, size, hashes, detections, content_inspected, start)
     }
 
     /// Walk `root` recursively, invoking `sink` for each report (streaming, so
@@ -142,5 +152,73 @@ impl<'e> Scanner<'e> {
         let mut reports = Vec::new();
         self.scan_path(root, |r| reports.push(r));
         reports
+    }
+}
+
+/// Scan each entry of a ZIP buffer and append entry-attributed detections.
+/// Nested archives are not recursed (each entry is evaluated as opaque bytes),
+/// which together with [`ArchiveLimits`] bounds zip-bomb exposure.
+fn scan_archive_entries(engine: &Engine, data: &[u8], detections: &mut Vec<Detection>) {
+    let limits = ArchiveLimits::default();
+    let _ = archive::for_each_zip_entry(data, &limits, |name, bytes, _truncated| {
+        let hashes = hash_bytes(bytes);
+        if let Ok(entry_detections) = engine.evaluate(&hashes, Some(bytes)) {
+            for mut d in entry_detections {
+                // Attribute the finding to the entry, e.g. "evil.exe → Rule".
+                d.name = format!("{name} \u{2192} {}", d.name);
+                detections.push(d);
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Engine, HashSignatureDb, YaraEngine};
+    use std::io::{Cursor, Write};
+    use zip::write::SimpleFileOptions;
+
+    const EICAR: &[u8] = br#"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"#;
+
+    #[test]
+    fn infected_zip_is_flagged_with_entry_attribution() {
+        let mut zip_bytes = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(Cursor::new(&mut zip_bytes));
+            zw.start_file("payload/eicar.com", SimpleFileOptions::default())
+                .unwrap();
+            zw.write_all(EICAR).unwrap();
+            zw.start_file("notes.txt", SimpleFileOptions::default())
+                .unwrap();
+            zw.write_all(b"benign").unwrap();
+            zw.finish().unwrap();
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let zpath = dir.path().join("bundle.zip");
+        std::fs::write(&zpath, &zip_bytes).unwrap();
+
+        let yara = YaraEngine::from_sources([(
+            "eicar",
+            r#"rule Eicar { strings: $s = "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!" condition: $s }"#,
+        )])
+        .unwrap();
+        let engine = Engine::new(HashSignatureDb::new(), Some(yara));
+        let scanner = Scanner::new(&engine);
+
+        let report = scanner.scan_file(&zpath);
+        assert!(
+            report.is_malicious(),
+            "zip containing EICAR must be flagged"
+        );
+        assert!(
+            report
+                .detections
+                .iter()
+                .any(|d| d.name.contains("eicar.com") && d.name.contains("Eicar")),
+            "detection should be attributed to the entry: {:?}",
+            report.detections
+        );
     }
 }
