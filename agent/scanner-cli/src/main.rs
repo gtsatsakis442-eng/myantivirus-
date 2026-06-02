@@ -63,6 +63,9 @@ struct ScanArgs {
     /// Max file size (MiB) to load for content/YARA inspection.
     #[arg(long, default_value_t = 128)]
     max_size_mib: u64,
+    /// Worker threads for directory scans (0 = all CPU cores).
+    #[arg(long, default_value_t = 0)]
+    threads: usize,
     /// Follow symbolic links.
     #[arg(long)]
     follow_symlinks: bool,
@@ -143,6 +146,7 @@ fn cmd_selftest() -> ExitCode {
             show_clean: false,
             max_size_mib: 128,
             follow_symlinks: false,
+            threads: 0,
         };
         let outcome = runner::run_scan(&engine, std::slice::from_ref(&sample), &params);
 
@@ -182,6 +186,7 @@ fn cmd_scan(args: ScanArgs) -> ExitCode {
             show_clean: args.show_clean,
             max_size_mib: args.max_size_mib,
             follow_symlinks: args.follow_symlinks,
+            threads: args.threads,
         };
         let outcome = runner::run_scan(&engine, &targets, &params);
         agent::AgentState::record_scan(

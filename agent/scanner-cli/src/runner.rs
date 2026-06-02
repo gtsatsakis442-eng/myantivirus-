@@ -43,6 +43,8 @@ pub struct ScanParams {
     pub show_clean: bool,
     pub max_size_mib: u64,
     pub follow_symlinks: bool,
+    /// Worker threads for directory scans (0 = all cores).
+    pub threads: usize,
 }
 
 /// Result of a scan run.
@@ -58,6 +60,7 @@ pub fn run_scan(engine: &Engine, targets: &[PathBuf], params: &ScanParams) -> Sc
         max_content_bytes: params.max_size_mib.saturating_mul(1024 * 1024),
         follow_symlinks: params.follow_symlinks,
         max_depth: None,
+        threads: params.threads,
     };
     let scanner = Scanner::with_options(engine, options);
 
@@ -84,7 +87,10 @@ pub fn run_scan(engine: &Engine, targets: &[PathBuf], params: &ScanParams) -> Sc
 
         for target in targets {
             if target.is_dir() {
-                scanner.scan_path(target, &mut handle);
+                // Parallel, multi-core scan for directories.
+                for report in scanner.scan_tree_parallel(target) {
+                    handle(report);
+                }
             } else {
                 handle(scanner.scan_file(target));
             }
@@ -130,8 +136,15 @@ pub fn print_summary(summary: &ScanSummary) {
     } else {
         summary.suspicious.to_string()
     };
+    let throughput = if summary.duration_ms > 0 && summary.bytes_scanned > 0 {
+        let mib = summary.bytes_scanned as f64 / (1024.0 * 1024.0);
+        let secs = summary.duration_ms as f64 / 1000.0;
+        format!(" · {:.1} MiB/s", mib / secs)
+    } else {
+        String::new()
+    };
     eprintln!(
-        "\nscanned {} file(s), {malicious} malicious, {suspicious} suspicious, {} skipped, {} error(s) in {} ms",
+        "\nscanned {} file(s), {malicious} malicious, {suspicious} suspicious, {} skipped, {} error(s) in {} ms{throughput}",
         summary.files_scanned, summary.skipped, summary.errors, summary.duration_ms
     );
 }

@@ -77,8 +77,9 @@ today: exact **hash signatures**, **YARA** rules, and **static PE heuristics**
 (entropy/packing, process-injection imports, W^X sections — reported as
 *suspicious*, never auto-actioned). It also scans **inside ZIP archives**
 (zip-bomb-guarded). Detections can be **quarantined** (isolated) and restored.
-The ONNX static-ML layer is intentionally deferred until the file-processing
-pipeline is hardened (see `ml/`).
+Directory scans run **in parallel across all CPU cores** (tune with `--threads`)
+and report throughput. The ONNX static-ML layer is intentionally deferred until
+the file-processing pipeline is hardened (see `ml/`).
 
 📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
 quarantine, troubleshooting.
