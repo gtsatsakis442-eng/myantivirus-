@@ -98,6 +98,8 @@ struct TalosApp {
     status: String,
     sig_source: String,
     last_update_unix: u64,
+    updating: bool,
+    update_rx: Option<Receiver<scanner_core::UpdateReport>>,
 
     q_items: Vec<scanner_core::QuarantineEntry>,
     q_loaded: bool,
@@ -125,6 +127,8 @@ impl TalosApp {
             status: "Ready.".to_string(),
             sig_source: engine_glue::signatures_source(),
             last_update_unix: 0,
+            updating: false,
+            update_rx: None,
             q_items: Vec::new(),
             q_loaded: false,
         }
@@ -137,16 +141,15 @@ impl TalosApp {
         self.quarantined = q;
     }
 
-    /// Reload the active definition set (writable store -> install dir ->
-    /// built-in) and re-count rules. Takes effect on the next scan immediately.
+    /// Fetch signature feeds (abuse.ch hashes + open YARA) into the store on a
+    /// background thread; the result is applied in `poll`.
     fn do_update(&mut self) {
-        self.refresh_inventory();
-        self.sig_source = engine_glue::signatures_source();
-        self.last_update_unix = now_unix();
-        self.status = format!(
-            "Definitions reloaded — {} hash signatures, {} YARA files.",
-            self.hashes, self.yara
-        );
+        if self.updating {
+            return;
+        }
+        self.updating = true;
+        self.status = "Updating signatures from feeds…".to_string();
+        self.update_rx = Some(engine_glue::start_update());
     }
 
     fn start(&mut self, targets: Vec<PathBuf>, label: &str) {
@@ -223,7 +226,32 @@ impl TalosApp {
             self.rx = None;
             self.refresh_inventory();
         }
-        if self.scanning {
+
+        // Drain a background feed update, if running.
+        if let Some(rx) = &self.update_rx {
+            match rx.try_recv() {
+                Ok(report) => {
+                    self.updating = false;
+                    self.update_rx = None;
+                    self.refresh_inventory();
+                    self.sig_source = engine_glue::signatures_source();
+                    self.last_update_unix = now_unix();
+                    let detail = report.messages.join(" · ");
+                    self.status = format!(
+                        "Update complete — {detail}  →  {} hash signatures, {} YARA files",
+                        self.hashes, self.yara
+                    );
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self.updating = false;
+                    self.update_rx = None;
+                    self.status = "Update failed.".to_string();
+                }
+            }
+        }
+
+        if self.scanning || self.updating {
             ctx.request_repaint();
         }
     }
@@ -367,8 +395,13 @@ impl TalosApp {
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let label = if self.updating {
+                        "Updating…"
+                    } else {
+                        "Update"
+                    };
                     let btn =
-                        egui::Button::new(RichText::new("Update").color(Color32::WHITE).strong())
+                        egui::Button::new(RichText::new(label).color(Color32::WHITE).strong())
                             .fill(ACCENT);
                     if ui.add_sized([150.0, 38.0], btn).clicked() {
                         self.do_update();

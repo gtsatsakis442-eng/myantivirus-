@@ -6,49 +6,34 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use scanner_core::{
-    Disposition, Engine, HashSignatureDb, Quarantine, ScanOptions, ScanReport, ScanSummary,
-    Scanner, Severity, YaraEngine,
+    Disposition, Engine, Quarantine, ScanOptions, ScanReport, ScanSummary, Scanner, Severity,
 };
 
 use crate::ui;
 
-/// Inputs needed to construct the detection engine.
+/// Inputs needed to construct the detection engine. `hashes`/`rules` are
+/// optional explicit overrides; otherwise the embedded baseline + the writable
+/// store (feed updates) are merged.
+#[derive(Default)]
 pub struct EngineConfig {
-    pub hashes: PathBuf,
-    pub rules: PathBuf,
+    pub hashes: Option<PathBuf>,
+    pub rules: Option<PathBuf>,
     pub no_yara: bool,
 }
 
-/// Build the engine, returning it plus (hash_count, yara_file_count) for display.
-///
-/// External content (MSI install / explicit `--hashes`/`--rules`) is preferred;
-/// otherwise the signatures embedded in the binary are used, so a standalone
-/// `talos.exe` works with no files alongside it.
+/// Build the engine: embedded baseline + the on-disk store (feed updates) +
+/// optional overrides. Returns it plus (hash_count, yara_file_count).
 pub fn load_engine(cfg: &EngineConfig) -> Result<(Engine, usize, usize)> {
-    let hashes = if cfg.hashes.is_file() {
-        HashSignatureDb::from_file(&cfg.hashes)
-            .with_context(|| format!("loading hash database {}", cfg.hashes.display()))?
-    } else {
-        HashSignatureDb::from_str_db(crate::embedded::HASHDB)
-            .context("loading embedded hash database")?
-    };
-    let hash_count = hashes.len();
-
-    let (yara, yara_files) = if cfg.no_yara {
-        (None, 0)
-    } else {
-        let engine = if cfg.rules.is_dir() {
-            YaraEngine::from_dir(&cfg.rules)
-                .with_context(|| format!("compiling YARA rules in {}", cfg.rules.display()))?
-        } else {
-            YaraEngine::from_sources(crate::embedded::YARA_RULES.iter().copied())
-                .context("compiling embedded YARA rules")?
-        };
-        let files = engine.source_files();
-        (Some(engine), files)
-    };
-
-    Ok((Engine::new(hashes, yara), hash_count, yara_files))
+    let (engine, hashes, yara, _skipped) = scanner_core::bootstrap::load_engine(
+        crate::embedded::HASHDB,
+        crate::embedded::YARA_RULES,
+        &crate::paths::store_dir(),
+        cfg.hashes.as_deref(),
+        cfg.rules.as_deref(),
+        cfg.no_yara,
+    )
+    .context("building detection engine")?;
+    Ok((engine, hashes, yara))
 }
 
 /// Output/behavior knobs for a scan run.

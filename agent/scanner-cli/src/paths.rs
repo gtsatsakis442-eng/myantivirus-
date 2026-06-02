@@ -2,34 +2,7 @@
 
 use std::path::PathBuf;
 
-/// Directory containing the running executable, if determinable.
-fn exe_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok()?.parent().map(PathBuf::from)
-}
-
-/// Base directory that holds the `signatures/` folder. Prefers the install
-/// location (next to the exe); falls back to the current working directory.
-fn content_base() -> PathBuf {
-    if let Some(dir) = exe_dir() {
-        if dir.join("signatures").is_dir() {
-            return dir;
-        }
-    }
-    PathBuf::from(".")
-}
-
-pub fn default_hashes() -> PathBuf {
-    content_base()
-        .join("signatures")
-        .join("hashes")
-        .join("baseline.hashdb")
-}
-
-pub fn default_rules() -> PathBuf {
-    content_base().join("signatures").join("yara")
-}
-
-/// Per-machine data directory (quarantine store, logs).
+/// Per-machine data directory (writable definitions store, quarantine, logs).
 pub fn data_dir() -> PathBuf {
     if let Ok(pd) = std::env::var("PROGRAMDATA") {
         return PathBuf::from(pd).join("Talos EPP");
@@ -41,6 +14,12 @@ pub fn data_dir() -> PathBuf {
             .join("talos-epp");
     }
     std::env::temp_dir().join("talos-epp")
+}
+
+/// Writable signatures store updated by the feed updater (`hashes/`, `yara/`).
+/// The engine merges this on top of the built-in baseline.
+pub fn store_dir() -> PathBuf {
+    data_dir().join("signatures")
 }
 
 pub fn default_quarantine_dir() -> PathBuf {

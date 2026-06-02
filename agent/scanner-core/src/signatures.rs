@@ -79,6 +79,68 @@ impl HashSignatureDb {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Merge entries from a database string, **skipping** malformed lines
+    /// (used for large external feeds where strictness is undesirable).
+    /// Returns the number of new signatures added.
+    pub fn extend_lenient(&mut self, text: &str) -> usize {
+        let mut added = 0;
+        for raw in text.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut parts = line.splitn(2, char::is_whitespace);
+            let hash = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
+            if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+                continue;
+            }
+            let name = parts
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Unnamed.Signature")
+                .to_string();
+            if self.entries.insert(hash, name).is_none() {
+                added += 1;
+            }
+        }
+        added
+    }
+
+    /// Merge every `*.hashdb` file in `dir` (lenient). A missing dir is empty.
+    pub fn from_dir(dir: impl AsRef<Path>) -> Result<Self> {
+        let dir = dir.as_ref();
+        let mut db = HashSignatureDb::new();
+        if !dir.is_dir() {
+            return Ok(db);
+        }
+        let rd = std::fs::read_dir(dir).map_err(|source| ScanError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let mut files: Vec<_> = rd
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .and_then(|x| x.to_str())
+                    .map(|x| x.eq_ignore_ascii_case("hashdb"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        files.sort();
+        for f in files {
+            if let Ok(text) = std::fs::read_to_string(&f) {
+                db.extend_lenient(&text);
+            }
+        }
+        Ok(db)
+    }
+
+    /// Merge another database into this one (other wins on key collisions).
+    pub fn merge(&mut self, other: HashSignatureDb) {
+        self.entries.extend(other.entries);
+    }
 }
 
 #[cfg(test)]

@@ -73,6 +73,70 @@ impl YaraEngine {
         Self::from_sources(sources)
     }
 
+    /// Like [`YaraEngine::from_sources`], but **skips** sources that fail to
+    /// compile (unsupported features, duplicate rule names, …), returning the
+    /// engine plus the skipped origins. This lets the engine ingest large
+    /// third-party rulesets without one bad rule breaking everything.
+    pub fn from_sources_lenient<I, S1, S2>(sources: I) -> (Self, Vec<String>)
+    where
+        I: IntoIterator<Item = (S1, S2)>,
+        S1: AsRef<str>,
+        S2: AsRef<str>,
+    {
+        let mut compiler = Compiler::new();
+        let mut source_files = 0usize;
+        let mut skipped = Vec::new();
+        for (origin, src) in sources {
+            // Validate the source in isolation, then add it to the real compiler.
+            let mut probe = Compiler::new();
+            if probe.add_source(src.as_ref()).is_err() || compiler.add_source(src.as_ref()).is_err()
+            {
+                skipped.push(origin.as_ref().to_string());
+                continue;
+            }
+            source_files += 1;
+        }
+        let rules = compiler.build();
+        (
+            Self {
+                rules,
+                source_files,
+            },
+            skipped,
+        )
+    }
+
+    /// Compile every `*.yar`/`*.yara` under `dir`, skipping files that fail to
+    /// compile. Returns the engine plus skipped file paths.
+    pub fn from_dir_lenient(dir: impl AsRef<Path>) -> (Self, Vec<String>) {
+        let dir = dir.as_ref();
+        let mut sources: Vec<(String, String)> = Vec::new();
+        if dir.is_dir() {
+            for entry in WalkDir::new(dir)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let path = entry.path();
+                let is_yara = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("yar") || e.eq_ignore_ascii_case("yara"))
+                    .unwrap_or(false);
+                if is_yara {
+                    if let Ok(text) = std::fs::read_to_string(path) {
+                        sources.push((path.display().to_string(), text));
+                    }
+                }
+            }
+            sources.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        Self::from_sources_lenient(sources)
+    }
+
     /// Number of source files that were compiled into this rule set.
     pub fn source_files(&self) -> usize {
         self.source_files

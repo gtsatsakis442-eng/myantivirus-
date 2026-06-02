@@ -22,8 +22,10 @@
 //! ```
 
 pub mod archive;
+pub mod bootstrap;
 pub mod engine;
 pub mod error;
+pub mod feeds;
 pub mod hashing;
 pub mod heuristics;
 pub mod pipeline;
@@ -36,6 +38,7 @@ pub mod yara_engine;
 pub use archive::ArchiveLimits;
 pub use engine::Engine;
 pub use error::{Result, ScanError};
+pub use feeds::{UpdateOptions, UpdateReport};
 pub use hashing::{hash_bytes, hash_reader, FileHashes};
 pub use pipeline::{ScanOptions, Scanner, DEFAULT_MAX_CONTENT_BYTES};
 pub use quarantine::{Quarantine, QuarantineEntry};
