@@ -62,7 +62,8 @@ This is a **defensive security product**. Everything here is intended for the
 ├── docs/                  Architecture & roadmap (01–07)
 ├── agent/                 User-mode agent (Rust workspace)
 │   ├── scanner-core/      Engine library: hashing, hash-sig DB, YARA, pipeline, quarantine
-│   └── scanner-cli/       `talos` app: interactive menu + scan/quarantine CLI
+│   ├── scanner-cli/       `talos` console/CLI agent (scan/quarantine, automation)
+│   └── talos-gui/         `talos-gui` desktop GUI app (egui) — dashboard/scan/quarantine
 ├── signatures/            Seed detection content (hashes + high-fidelity YARA)
 ├── installer/             WiX MSI + Burn bootstrapper + code-signing simulation
 ├── kernel/                Phase 2 kernel sensor (placeholder)
@@ -70,9 +71,10 @@ This is a **defensive security product**. Everything here is intended for the
 └── .github/workflows/     CI: Linux engine gates + Windows installer + signing sim
 ```
 
-## Phase 1 — the app (`talos.exe`)
+## Phase 1 — the app (`talos-gui.exe` + `talos.exe`)
 
-A standalone, installable endpoint-protection app. Three detection layers
+Ships as a **desktop GUI** (`talos-gui.exe`, a dark dashboard-style console) and
+a headless **CLI agent** (`talos.exe`) — both over the same engine. Three detection layers
 today: exact **hash signatures**, **YARA** rules, and **static PE heuristics**
 (entropy/packing, process-injection imports, W^X sections — reported as
 *suspicious*, never auto-actioned). It also scans **inside ZIP archives**
@@ -84,26 +86,32 @@ the file-processing pipeline is hardened (see `ml/`).
 📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
 quarantine, troubleshooting.
 
-### Windows — get & run `talos.exe`
+### Windows — get & run
 
-**Option A — download the prebuilt app** (no toolchain needed). In PowerShell:
+Two binaries ship on the **Releases → `latest`** page (both self-contained —
+signatures are embedded, no extra files needed):
+
+| File | What it is |
+|---|---|
+| **`talos-gui.exe`** | the **desktop GUI** — a dark, dashboard-style security console. Double-click it. |
+| `talos.exe` | the console/CLI agent for automation & scripting |
+| `talos-agent.msi` | the enterprise installer (GPO / Intune / SCCM) |
+
+**Download the GUI** (PowerShell; `gh` works for this private repo):
 ```powershell
-# Easiest (works for private repos) — via the GitHub CLI:
-gh release download latest --repo gtsatsakis442-eng/myantivirus- --pattern talos.exe
-
-# No gh? Grab it from the browser at Releases -> "latest", or:
-Invoke-WebRequest "https://github.com/gtsatsakis442-eng/myantivirus-/releases/download/latest/talos.exe" -OutFile talos.exe
-
-.\talos.exe            # launch the interactive console (or just double-click it)
-.\talos.exe selftest   # verify detection works (EICAR)
+gh release download latest --repo gtsatsakis442-eng/myantivirus- --pattern talos-gui.exe
+.\talos-gui.exe            # opens the GUI window
 ```
-The enterprise installer `talos-agent.msi` is attached to the same release.
-
-**Option B — build it yourself** (PowerShell; needs the Rust toolchain):
+No `gh`? Use the browser (**Releases → "latest"**) or:
 ```powershell
-cargo test --all
-cargo build --release
-.\target\release\talos.exe selftest
+Invoke-WebRequest "https://github.com/gtsatsakis442-eng/myantivirus-/releases/download/latest/talos-gui.exe" -OutFile talos-gui.exe
+```
+
+**Build it yourself** (PowerShell; needs the Rust toolchain):
+```powershell
+cargo build --release -p talos-gui     # the GUI  -> target\release\talos-gui.exe
+cargo build --release -p scanner-cli   # the CLI  -> target\release\talos.exe
+.\target\release\talos.exe selftest    # verify detection (EICAR)
 ```
 
 **Drive it from the CLI** (Windows or Unix):

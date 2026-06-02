@@ -24,8 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build app (release, windows-msvc)
-        run: cargo build --release --locked -p scanner-cli --target x86_64-pc-windows-msvc
+      - name: Build apps (release, windows-msvc)
+        run: cargo build --release --locked -p scanner-cli -p talos-gui --target x86_64-pc-windows-msvc
 
       - name: Build MSI (WiX 5)
         shell: pwsh
@@ -39,6 +39,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/talos-gui.exe dist/talos-gui.exe
           Copy-Item target/x86_64-pc-windows-msvc/release/talos.exe dist/talos.exe
           Copy-Item installer/wix/talos-agent.msi dist/talos-agent.msi
           # Production signing (EV cert in an HSM) would run here on the hardened
@@ -56,6 +57,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/talos-gui.exe
             dist/talos.exe
             dist/talos-agent.msi
           generate_release_notes: true
@@ -68,17 +70,19 @@ jobs:
           name: Talos EPP — latest build
           prerelease: true
           files: |
+            dist/talos-gui.exe
             dist/talos.exe
             dist/talos-agent.msi
           body: |
             **Rolling pre-release built from `main`.**
 
-            Download **`talos.exe`** (the standalone app) or **`talos-agent.msi`**
-            (the enterprise installer).
+            - **`talos-gui.exe`** — the desktop **GUI app** (double-click it).
+            - **`talos.exe`** — the console/CLI agent (automation, `talos selftest`).
+            - **`talos-agent.msi`** — the enterprise installer (GPO/Intune/SCCM).
 
-            Run it: double-click `talos.exe` for the interactive console, or
-            `talos selftest` from a terminal to verify detection.
+            Both exes are self-contained (signatures embedded); no extra files
+            needed.
 
             > Not production-signed yet — Windows SmartScreen will show an
-            > "Unknown Publisher" prompt until the EV certificate is applied
-            > (see docs/04-deployment-distribution.md).
+            > "Unknown Publisher" prompt (click *More info → Run anyway*) until
+            > the EV certificate is applied (see docs/04-deployment-distribution.md).
