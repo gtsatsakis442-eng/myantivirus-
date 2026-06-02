@@ -5,6 +5,7 @@
 //!   0 = clean, 1 = threat detected, 2 = error.
 
 mod agent;
+mod embedded;
 mod interactive;
 mod paths;
 mod runner;

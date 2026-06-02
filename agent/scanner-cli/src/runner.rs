@@ -20,16 +20,30 @@ pub struct EngineConfig {
 }
 
 /// Build the engine, returning it plus (hash_count, yara_file_count) for display.
+///
+/// External content (MSI install / explicit `--hashes`/`--rules`) is preferred;
+/// otherwise the signatures embedded in the binary are used, so a standalone
+/// `talos.exe` works with no files alongside it.
 pub fn load_engine(cfg: &EngineConfig) -> Result<(Engine, usize, usize)> {
-    let hashes = HashSignatureDb::from_file(&cfg.hashes)
-        .with_context(|| format!("loading hash database {}", cfg.hashes.display()))?;
+    let hashes = if cfg.hashes.is_file() {
+        HashSignatureDb::from_file(&cfg.hashes)
+            .with_context(|| format!("loading hash database {}", cfg.hashes.display()))?
+    } else {
+        HashSignatureDb::from_str_db(crate::embedded::HASHDB)
+            .context("loading embedded hash database")?
+    };
     let hash_count = hashes.len();
 
     let (yara, yara_files) = if cfg.no_yara {
         (None, 0)
     } else {
-        let engine = YaraEngine::from_dir(&cfg.rules)
-            .with_context(|| format!("compiling YARA rules in {}", cfg.rules.display()))?;
+        let engine = if cfg.rules.is_dir() {
+            YaraEngine::from_dir(&cfg.rules)
+                .with_context(|| format!("compiling YARA rules in {}", cfg.rules.display()))?
+        } else {
+            YaraEngine::from_sources(crate::embedded::YARA_RULES.iter().copied())
+                .context("compiling embedded YARA rules")?
+        };
         let files = engine.source_files();
         (Some(engine), files)
     };
