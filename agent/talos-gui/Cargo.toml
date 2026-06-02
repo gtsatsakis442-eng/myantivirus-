@@ -1,0 +1,18 @@
+[package]
+name = "talos-gui"
+description = "Talos EPP — desktop GUI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "talos-gui"
+path = "src/main.rs"
+
+[dependencies]
+scanner-core = { path = "../scanner-core" }
+eframe = "0.29"
+egui = "0.29"

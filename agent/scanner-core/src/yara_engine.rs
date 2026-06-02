@@ -78,32 +78,44 @@ impl YaraEngine {
         self.source_files
     }
 
+    /// A reusable scanner over the compiled rules. Reusing one scanner across
+    /// many files (e.g. one per worker thread) avoids the per-file cost of
+    /// constructing a scanner — the main lever for fast bulk scans.
+    pub(crate) fn scanner(&self) -> yara_x::Scanner<'_> {
+        yara_x::Scanner::new(&self.rules)
+    }
+
     /// Scan an in-memory buffer, returning one detection per matching rule.
     /// A rule's `severity` metadata string (if present) sets the severity.
     pub fn scan(&self, data: &[u8]) -> Result<Vec<Detection>> {
-        let mut scanner = yara_x::Scanner::new(&self.rules);
-        let results = scanner
-            .scan(data)
-            .map_err(|e| ScanError::Yara(e.to_string()))?;
+        let mut scanner = self.scanner();
+        scan_with(&mut scanner, data)
+    }
+}
 
-        let mut detections = Vec::new();
-        for rule in results.matching_rules() {
-            let mut severity = Severity::High;
-            for (key, value) in rule.metadata() {
-                if key.eq_ignore_ascii_case("severity") {
-                    if let yara_x::MetaValue::String(s) = value {
-                        severity = Severity::from_meta(s);
-                    }
+/// Run a (reusable) compiled scanner over `data` and map matches to detections.
+pub(crate) fn scan_with(scanner: &mut yara_x::Scanner<'_>, data: &[u8]) -> Result<Vec<Detection>> {
+    let results = scanner
+        .scan(data)
+        .map_err(|e| ScanError::Yara(e.to_string()))?;
+
+    let mut detections = Vec::new();
+    for rule in results.matching_rules() {
+        let mut severity = Severity::High;
+        for (key, value) in rule.metadata() {
+            if key.eq_ignore_ascii_case("severity") {
+                if let yara_x::MetaValue::String(s) = value {
+                    severity = Severity::from_meta(s);
                 }
             }
-            detections.push(Detection {
-                name: rule.identifier().to_string(),
-                kind: DetectionKind::YaraRule,
-                severity,
-            });
         }
-        Ok(detections)
+        detections.push(Detection {
+            name: rule.identifier().to_string(),
+            kind: DetectionKind::YaraRule,
+            severity,
+        });
     }
+    Ok(detections)
 }
 
 #[cfg(test)]

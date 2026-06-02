@@ -36,6 +36,31 @@ impl Engine {
     /// that case only the (streamed) hash layer runs. Hash matches are treated
     /// as `Critical` — an exact match against known-bad is high-confidence.
     pub fn evaluate(&self, hashes: &FileHashes, content: Option<&[u8]>) -> Result<Vec<Detection>> {
+        self.evaluate_inner(hashes, content, None)
+    }
+
+    /// Like [`Engine::evaluate`] but reuses a caller-provided YARA scanner — used
+    /// by the parallel scan path, which keeps one scanner per worker thread.
+    pub(crate) fn evaluate_with(
+        &self,
+        hashes: &FileHashes,
+        content: Option<&[u8]>,
+        yara_scanner: Option<&mut yara_x::Scanner<'_>>,
+    ) -> Result<Vec<Detection>> {
+        self.evaluate_inner(hashes, content, yara_scanner)
+    }
+
+    /// A reusable YARA scanner over the loaded rules, if YARA is enabled.
+    pub(crate) fn new_yara_scanner(&self) -> Option<yara_x::Scanner<'_>> {
+        self.yara.as_ref().map(|y| y.scanner())
+    }
+
+    fn evaluate_inner(
+        &self,
+        hashes: &FileHashes,
+        content: Option<&[u8]>,
+        yara_scanner: Option<&mut yara_x::Scanner<'_>>,
+    ) -> Result<Vec<Detection>> {
         let mut detections = Vec::new();
 
         if let Some(name) = self.hashes.lookup(&hashes.sha256) {
@@ -47,8 +72,15 @@ impl Engine {
         }
 
         if let Some(bytes) = content {
-            if let Some(engine) = self.yara.as_ref() {
-                detections.extend(engine.scan(bytes)?);
+            match yara_scanner {
+                // Reuse the provided scanner (parallel path).
+                Some(scanner) => detections.extend(crate::yara_engine::scan_with(scanner, bytes)?),
+                // Otherwise build a one-off scanner via the engine.
+                None => {
+                    if let Some(engine) = self.yara.as_ref() {
+                        detections.extend(engine.scan(bytes)?);
+                    }
+                }
             }
             // Static heuristics (L2) run on PE content; no-op for other files.
             detections.extend(crate::heuristics::analyze(bytes));

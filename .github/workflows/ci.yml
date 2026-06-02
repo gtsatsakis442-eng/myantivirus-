@@ -39,14 +39,16 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
+      # The GUI (talos-gui / eframe) is a Windows product and needs GL/X11 dev
+      # libs to build on Linux; it is built & validated on the Windows job below.
       - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --exclude talos-gui --all-targets --all-features --locked -- -D warnings
 
       - name: Test
-        run: cargo test --all --locked
+        run: cargo test --workspace --exclude talos-gui --locked
 
       - name: Release build (Linux)
-        run: cargo build --release --locked
+        run: cargo build --release --locked --workspace --exclude talos-gui
 
   installer:
     name: Installer + code-signing simulation
@@ -55,8 +57,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build app (release, windows-msvc)
-        run: cargo build --release --locked -p scanner-cli --target x86_64-pc-windows-msvc
+      - name: Build apps (release, windows-msvc)
+        run: cargo build --release --locked -p scanner-cli -p talos-gui --target x86_64-pc-windows-msvc
 
       - name: Build MSI (WiX 5)
         shell: pwsh
@@ -68,9 +70,12 @@ jobs:
           wix build Package.wxs -o talos-agent.msi
           if (-not (Test-Path talos-agent.msi)) { throw "MSI was not produced" }
 
-      - name: Code-signing simulation (app .exe)
+      - name: Code-signing simulation (app exes)
         shell: pwsh
-        run: ./installer/sign/sign.ps1 -Mode simulate -Path "target/x86_64-pc-windows-msvc/release/talos.exe"
+        run: |
+          ./installer/sign/sign.ps1 -Mode simulate -Path `
+            "target/x86_64-pc-windows-msvc/release/talos.exe", `
+            "target/x86_64-pc-windows-msvc/release/talos-gui.exe"
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
@@ -79,4 +84,5 @@ jobs:
           path: |
             installer/wix/talos-agent.msi
             target/x86_64-pc-windows-msvc/release/talos.exe
+            target/x86_64-pc-windows-msvc/release/talos-gui.exe
           if-no-files-found: error

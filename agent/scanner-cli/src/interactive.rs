@@ -181,6 +181,7 @@ fn scan(targets: Vec<PathBuf>, label: &str) -> Result<()> {
         show_clean: false,
         max_size_mib: 128,
         follow_symlinks: false,
+        threads: 0,
     };
     let outcome = runner::run_scan(&engine, &targets, &params);
     agent::AgentState::record_scan(

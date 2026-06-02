@@ -9,9 +9,10 @@
 //! * Any I/O error becomes an `Error` report; traversal continues.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use rayon::prelude::*;
 use walkdir::WalkDir;
 
 use crate::archive::{self, ArchiveLimits};
@@ -32,6 +33,8 @@ pub struct ScanOptions {
     pub follow_symlinks: bool,
     /// Optional recursion depth limit.
     pub max_depth: Option<usize>,
+    /// Worker threads for parallel directory scans (`0` = all available cores).
+    pub threads: usize,
 }
 
 impl Default for ScanOptions {
@@ -40,6 +43,7 @@ impl Default for ScanOptions {
             max_content_bytes: DEFAULT_MAX_CONTENT_BYTES,
             follow_symlinks: false,
             max_depth: None,
+            threads: 0,
         }
     }
 }
@@ -64,6 +68,15 @@ impl<'e> Scanner<'e> {
 
     /// Scan a single path. Always returns a report (never panics).
     pub fn scan_file(&self, path: &Path) -> ScanReport {
+        self.scan_file_with(path, None)
+    }
+
+    /// Scan a single path, optionally reusing a caller-provided YARA scanner.
+    fn scan_file_with(
+        &self,
+        path: &Path,
+        yara_scanner: Option<&mut yara_x::Scanner<'_>>,
+    ) -> ScanReport {
         let start = Instant::now();
 
         let meta = match fs::symlink_metadata(path) {
@@ -105,10 +118,14 @@ impl<'e> Scanner<'e> {
                 }
             };
 
-        let mut detections = match self.engine.evaluate(&hashes, content.as_deref()) {
-            Ok(d) => d,
-            Err(e) => return ScanReport::errored(path, size, e.to_string(), start),
-        };
+        let mut detections =
+            match self
+                .engine
+                .evaluate_with(&hashes, content.as_deref(), yara_scanner)
+            {
+                Ok(d) => d,
+                Err(e) => return ScanReport::errored(path, size, e.to_string(), start),
+            };
 
         // If the file is a ZIP, scan its entries and fold any findings into this
         // report (so an infected archive is flagged as the archive that it is).
@@ -151,6 +168,67 @@ impl<'e> Scanner<'e> {
     pub fn scan_tree(&self, root: &Path) -> Vec<ScanReport> {
         let mut reports = Vec::new();
         self.scan_path(root, |r| reports.push(r));
+        reports
+    }
+
+    /// Walk `root` and scan files **in parallel** across worker threads.
+    ///
+    /// This is the high-throughput path for large trees: traversal is done once
+    /// (cheap), then files are scanned concurrently (`options.threads` workers,
+    /// or all cores when `0`). The engine is shared immutably across threads;
+    /// each YARA scan uses its own scanner, so there is no contention.
+    pub fn scan_tree_parallel(&self, root: &Path) -> Vec<ScanReport> {
+        let mut walker = WalkDir::new(root).follow_links(self.options.follow_symlinks);
+        if let Some(depth) = self.options.max_depth {
+            walker = walker.max_depth(depth);
+        }
+
+        let mut files: Vec<PathBuf> = Vec::new();
+        let mut reports: Vec<ScanReport> = Vec::new();
+        for entry in walker.into_iter() {
+            match entry {
+                Ok(e) => {
+                    if !e.file_type().is_dir() {
+                        files.push(e.into_path());
+                    }
+                }
+                Err(err) => {
+                    let path = err
+                        .path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "<unknown>".to_string());
+                    reports.push(ScanReport::walk_error(path, err.to_string()));
+                }
+            }
+        }
+
+        // One reusable YARA scanner per worker thread (via `map_init`) — this is
+        // what makes bulk scans fast: no per-file scanner construction.
+        let scan = || -> Vec<ScanReport> {
+            files
+                .par_iter()
+                .map_init(
+                    || self.engine.new_yara_scanner(),
+                    |scanner, path| self.scan_file_with(path, scanner.as_mut()),
+                )
+                .collect()
+        };
+
+        // `threads == 0` uses Rayon's global pool (all cores); otherwise run on a
+        // bounded local pool so the agent can cap its CPU footprint.
+        let scanned = if self.options.threads == 0 {
+            scan()
+        } else {
+            match rayon::ThreadPoolBuilder::new()
+                .num_threads(self.options.threads)
+                .build()
+            {
+                Ok(pool) => pool.install(scan),
+                Err(_) => scan(),
+            }
+        };
+
+        reports.extend(scanned);
         reports
     }
 }
@@ -219,6 +297,30 @@ mod tests {
                 .any(|d| d.name.contains("eicar.com") && d.name.contains("Eicar")),
             "detection should be attributed to the entry: {:?}",
             report.detections
+        );
+    }
+
+    #[test]
+    fn parallel_scan_finds_threats() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("eicar.com"), EICAR).unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"benign a").unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"benign b").unwrap();
+
+        let yara = YaraEngine::from_sources([(
+            "eicar",
+            r#"rule Eicar { strings: $s = "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!" condition: $s }"#,
+        )])
+        .unwrap();
+        let engine = Engine::new(HashSignatureDb::new(), Some(yara));
+        let scanner = Scanner::new(&engine);
+
+        let reports = scanner.scan_tree_parallel(dir.path());
+        assert_eq!(reports.len(), 3, "all three files reported");
+        assert_eq!(
+            reports.iter().filter(|r| r.is_malicious()).count(),
+            1,
+            "only EICAR is malicious"
         );
     }
 }

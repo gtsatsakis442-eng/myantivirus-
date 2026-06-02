@@ -94,23 +94,39 @@ pub struct Inventory {
 }
 
 pub fn inventory() -> Inventory {
-    let hash_signatures = scanner_core::HashSignatureDb::from_file(paths::default_hashes())
-        .map(|d| d.len())
-        .unwrap_or(0);
+    // Mirror the engine loader: external content if present, else the embedded
+    // defaults baked into the binary.
+    let hashes_path = paths::default_hashes();
+    let hash_signatures = if hashes_path.is_file() {
+        scanner_core::HashSignatureDb::from_file(&hashes_path)
+            .map(|d| d.len())
+            .unwrap_or(0)
+    } else {
+        scanner_core::HashSignatureDb::from_str_db(crate::embedded::HASHDB)
+            .map(|d| d.len())
+            .unwrap_or(0)
+    };
 
-    let yara_files = std::fs::read_dir(paths::default_rules())
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
-                        .and_then(|x| x.to_str())
-                        .map(|x| x.eq_ignore_ascii_case("yar") || x.eq_ignore_ascii_case("yara"))
-                        .unwrap_or(false)
-                })
-                .count()
-        })
-        .unwrap_or(0);
+    let rules_dir = paths::default_rules();
+    let yara_files = if rules_dir.is_dir() {
+        std::fs::read_dir(&rules_dir)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .and_then(|x| x.to_str())
+                            .map(|x| {
+                                x.eq_ignore_ascii_case("yar") || x.eq_ignore_ascii_case("yara")
+                            })
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    } else {
+        crate::embedded::YARA_RULES.len()
+    };
 
     let quarantined = scanner_core::Quarantine::open(paths::default_quarantine_dir())
         .and_then(|q| q.list())

@@ -91,6 +91,7 @@ talos quarantine purge --all        # empty the vault
 | `--json` | NDJSON output (telemetry shape, see [docs/07](07-telemetry-flow.md)) | off |
 | `--show-clean` | also print clean/skipped files | off |
 | `--max-size-mib <N>` | cap in-memory inspection size (large files are hash-only) | 128 |
+| `--threads <N>` | worker threads for directory scans (`0` = all CPU cores) | 0 |
 | `--follow-symlinks` | follow symlinks while walking | off |
 | `--no-yara` | hash-only (skip YARA) | off |
 | `--hashes <file>` / `--rules <dir>` | override signature locations | install dir |
