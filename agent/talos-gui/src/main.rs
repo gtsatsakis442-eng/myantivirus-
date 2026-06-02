@@ -96,6 +96,8 @@ struct TalosApp {
     last: Option<Done>,
     last_scan_unix: u64,
     status: String,
+    sig_source: String,
+    last_update_unix: u64,
 
     q_items: Vec<scanner_core::QuarantineEntry>,
     q_loaded: bool,
@@ -121,6 +123,8 @@ impl TalosApp {
             last: None,
             last_scan_unix: 0,
             status: "Ready.".to_string(),
+            sig_source: engine_glue::signatures_source(),
+            last_update_unix: 0,
             q_items: Vec::new(),
             q_loaded: false,
         }
@@ -131,6 +135,18 @@ impl TalosApp {
         self.hashes = h;
         self.yara = y;
         self.quarantined = q;
+    }
+
+    /// Reload the active definition set (writable store -> install dir ->
+    /// built-in) and re-count rules. Takes effect on the next scan immediately.
+    fn do_update(&mut self) {
+        self.refresh_inventory();
+        self.sig_source = engine_glue::signatures_source();
+        self.last_update_unix = now_unix();
+        self.status = format!(
+            "Definitions reloaded — {} hash signatures, {} YARA files.",
+            self.hashes, self.yara
+        );
     }
 
     fn start(&mut self, targets: Vec<PathBuf>, label: &str) {
@@ -291,27 +307,23 @@ impl TalosApp {
             )
         };
 
+        // Hero protection-status card.
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("●").color(status_col).size(40.0));
-                ui.add_space(8.0);
+                ui.label(RichText::new("●").color(status_col).size(46.0));
+                ui.add_space(12.0);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(title).color(TEXT).size(22.0).strong());
+                    ui.label(RichText::new(title).color(TEXT).size(24.0).strong());
                     ui.label(RichText::new(subtitle).color(DIM).size(13.0));
                 });
             });
         });
 
-        ui.add_space(6.0);
+        ui.add_space(10.0);
         ui.horizontal_wrapped(|ui| {
-            stat(ui, "Signatures", &format!("{}", self.hashes), "hash rules");
-            stat(ui, "YARA files", &format!("{}", self.yara), "rule sets");
-            stat(
-                ui,
-                "Quarantine",
-                &format!("{}", self.quarantined),
-                "isolated",
-            );
+            stat(ui, "Signatures", &self.hashes.to_string(), "hash rules");
+            stat(ui, "YARA files", &self.yara.to_string(), "rule sets");
+            stat(ui, "Quarantine", &self.quarantined.to_string(), "isolated");
             stat(
                 ui,
                 "Last scan",
@@ -324,7 +336,57 @@ impl TalosApp {
             );
         });
 
-        ui.add_space(14.0);
+        ui.add_space(10.0);
+        // Definitions + Update.
+        card(ui, CARD, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Definitions").color(TEXT).size(16.0).strong());
+                    ui.label(
+                        RichText::new(format!("Source: {}", self.sig_source))
+                            .color(DIM)
+                            .size(12.0),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "{} hash signatures · {} YARA rule files",
+                            self.hashes, self.yara
+                        ))
+                        .color(DIM)
+                        .size(12.0),
+                    );
+                    let updated = if self.last_update_unix == 0 {
+                        "not checked this session".to_string()
+                    } else {
+                        time_ago(self.last_update_unix)
+                    };
+                    ui.label(
+                        RichText::new(format!("Last updated: {updated}"))
+                            .color(DIM)
+                            .size(12.0),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let btn =
+                        egui::Button::new(RichText::new("Update").color(Color32::WHITE).strong())
+                            .fill(ACCENT);
+                    if ui.add_sized([150.0, 38.0], btn).clicked() {
+                        self.do_update();
+                    }
+                });
+            });
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(
+                    "Reloads the local / built-in definition store and re-counts rules. \
+                     Live cloud delta updates are on the roadmap.",
+                )
+                .color(DIM)
+                .size(11.0),
+            );
+        });
+
+        ui.add_space(12.0);
         if primary_button(ui, "Run Quick Scan").clicked() {
             self.start(engine_glue::quick_scan_paths(), "Quick");
         }

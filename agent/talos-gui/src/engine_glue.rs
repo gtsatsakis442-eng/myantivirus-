@@ -32,12 +32,33 @@ fn exe_dir() -> Option<PathBuf> {
 }
 
 fn content_base() -> PathBuf {
+    // Prefer a writable, updatable definitions store (where an updater/admin
+    // drops new signatures), then the install dir, then the CWD.
+    if data_dir().join("signatures").is_dir() {
+        return data_dir();
+    }
     if let Some(dir) = exe_dir() {
         if dir.join("signatures").is_dir() {
             return dir;
         }
     }
     PathBuf::from(".")
+}
+
+/// Human-readable description of where the active signatures come from.
+pub fn signatures_source() -> String {
+    if data_dir().join("signatures").is_dir() {
+        return format!("local store · {}", data_dir().join("signatures").display());
+    }
+    if let Some(dir) = exe_dir() {
+        if dir.join("signatures").is_dir() {
+            return format!("install dir · {}", dir.join("signatures").display());
+        }
+    }
+    if std::path::Path::new("signatures").is_dir() {
+        return "./signatures".to_string();
+    }
+    "built-in (embedded in app)".to_string()
 }
 
 pub fn default_hashes() -> PathBuf {
