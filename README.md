@@ -101,6 +101,22 @@ Only SHA-256 hash entries are ingested; incompatible YARA rules are skipped
 gracefully. Sources, licenses, and attribution:
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
+**Desktop GUI** — a dark security console modeled on the patterns that make the
+leading suites (Bitdefender, Malwarebytes, ESET, Kaspersky) approachable:
+
+| Area | What it gives you |
+|---|---|
+| **Dashboard** | protection-status hero + a **Security Advisor** that recommends contextual actions (run a scan, update, review quarantine) computed from real state |
+| **Protection** | a module grid showing **Active** layers (antimalware, YARA, heuristics, archive inspection, quarantine, updates) with on/off toggles, and **Roadmap** modules (real-time, web, firewall, ransomware) honestly labeled — not faked "on" |
+| **Scan** | Quick / Full / Custom with live progress and per-detection results |
+| **Quarantine** | isolate, restore, delete |
+| **Activity** | a persisted log of scans, updates and quarantine actions |
+| **Settings** | real engine controls — file-size cap, **exclusions** (trusted paths the scanner skips), archive/heuristics/symlink toggles, scheduled-scan preference — saved to `config.json` and applied to the next scan |
+
+To keep false positives low, the heuristic layer **trusts Authenticode-signed
+binaries** (so signed Microsoft/vendor DLLs aren't flagged) and only raises
+*suspicious* when **two or more** independent signals agree.
+
 📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
 **updating signatures**, quarantine, troubleshooting.
 

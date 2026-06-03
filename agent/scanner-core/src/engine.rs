@@ -10,16 +10,37 @@ use crate::yara_engine::YaraEngine;
 pub struct Engine {
     hashes: HashSignatureDb,
     yara: Option<YaraEngine>,
+    heuristics: bool,
 }
 
 impl Engine {
     pub fn new(hashes: HashSignatureDb, yara: Option<YaraEngine>) -> Self {
-        Self { hashes, yara }
+        Self {
+            hashes,
+            yara,
+            heuristics: true,
+        }
     }
 
     /// Engine with only the hash layer loaded.
     pub fn hash_only(hashes: HashSignatureDb) -> Self {
-        Self { hashes, yara: None }
+        Self {
+            hashes,
+            yara: None,
+            heuristics: true,
+        }
+    }
+
+    /// Enable or disable the static heuristic layer (L2). Hash and YARA layers
+    /// are unaffected. Returns `self` for builder-style configuration.
+    pub fn with_heuristics(mut self, on: bool) -> Self {
+        self.heuristics = on;
+        self
+    }
+
+    /// Toggle the static heuristic layer in place.
+    pub fn set_heuristics(&mut self, on: bool) {
+        self.heuristics = on;
     }
 
     pub fn hash_db(&self) -> &HashSignatureDb {
@@ -83,7 +104,9 @@ impl Engine {
                 }
             }
             // Static heuristics (L2) run on PE content; no-op for other files.
-            detections.extend(crate::heuristics::analyze(bytes));
+            if self.heuristics {
+                detections.extend(crate::heuristics::analyze(bytes));
+            }
         }
 
         Ok(detections)

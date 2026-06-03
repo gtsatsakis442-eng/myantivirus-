@@ -6,7 +6,25 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-use scanner_core::{Disposition, Engine, Quarantine, ScanReport, ScanSummary, Scanner};
+use scanner_core::{
+    Disposition, Engine, Quarantine, ScanOptions, ScanReport, ScanSummary, Scanner,
+};
+
+use crate::config::TalosConfig;
+use crate::history;
+
+/// Build [`ScanOptions`] from user settings so a scan honours the configured
+/// size cap, symlink policy, archive inspection, exclusions and thread count.
+fn scan_options(cfg: &TalosConfig) -> ScanOptions {
+    ScanOptions {
+        max_content_bytes: cfg.max_size_mib.saturating_mul(1024 * 1024),
+        follow_symlinks: cfg.follow_symlinks,
+        scan_archives: cfg.scan_archives,
+        exclusions: cfg.exclusion_paths(),
+        threads: cfg.threads,
+        ..Default::default()
+    }
+}
 
 /// Baseline signatures embedded into the binary (works with no external files).
 pub const HASHDB: &str = include_str!("../../../signatures/hashes/baseline.hashdb");
@@ -120,6 +138,13 @@ pub fn start_update() -> Receiver<scanner_core::UpdateReport> {
     let store = store_dir();
     thread::spawn(move || {
         let report = scanner_core::feeds::update(&store, &scanner_core::UpdateOptions::default());
+        history::record(
+            "update",
+            format!(
+                "Signature update — {} hashes, {} YARA file(s)",
+                report.hashes_added, report.yara_files
+            ),
+        );
         let _ = tx.send(report);
     });
     rx
@@ -146,14 +171,16 @@ pub enum ScanMsg {
 pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
     let (tx, rx) = mpsc::channel::<ScanMsg>();
     thread::spawn(move || {
-        let (engine, _, _) = match load_engine() {
+        let cfg = TalosConfig::load();
+        let (mut engine, _, _) = match load_engine() {
             Ok(v) => v,
             Err(e) => {
                 let _ = tx.send(ScanMsg::Failed(e));
                 return;
             }
         };
-        let scanner = Scanner::new(&engine);
+        engine.set_heuristics(cfg.heuristics);
+        let scanner = Scanner::with_options(&engine, scan_options(&cfg));
         let mut summary = ScanSummary::default();
         let started = std::time::Instant::now();
         let mut scanned: u64 = 0;
@@ -187,11 +214,19 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
             }
         }
 
+        let ms = started.elapsed().as_millis() as u64;
+        history::record(
+            "scan",
+            format!(
+                "Scan — {} files · {} malicious · {} suspicious · {} ms",
+                summary.files_scanned, summary.malicious, summary.suspicious, ms
+            ),
+        );
         let _ = tx.send(ScanMsg::Done {
             files: summary.files_scanned,
             malicious: summary.malicious,
             suspicious: summary.suspicious,
-            ms: started.elapsed().as_millis() as u64,
+            ms,
             bytes: summary.bytes_scanned,
         });
     });

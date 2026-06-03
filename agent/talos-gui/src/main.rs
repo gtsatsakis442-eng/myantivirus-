@@ -1,8 +1,16 @@
 //! Talos EPP — desktop GUI (egui/eframe). A self-contained, dark "security
 //! console" front-end over the same engine the CLI uses.
+//!
+//! The layout borrows the patterns that make the leading suites approachable:
+//! a Bitdefender-style **Security Advisor** with contextual recommendations, a
+//! Malwarebytes-style **Protection module grid**, an ESET/Kaspersky-style
+//! grouped navigation, a persisted **Activity** log, and a power-user
+//! **Settings** panel whose toggles genuinely change how scans run.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod config;
 mod engine_glue;
+mod history;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -12,6 +20,7 @@ use eframe::egui;
 use egui::{Color32, RichText};
 use scanner_core::{ScanReport, Severity};
 
+use config::{Schedule, TalosConfig};
 use engine_glue::ScanMsg;
 
 // ---- palette -------------------------------------------------------------
@@ -27,8 +36,8 @@ const AMBER: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([980.0, 660.0])
-            .with_min_inner_size([820.0, 560.0])
+            .with_inner_size([1040.0, 700.0])
+            .with_min_inner_size([880.0, 600.0])
             .with_title("Talos EPP — Endpoint Protection"),
         ..Default::default()
     };
@@ -63,8 +72,11 @@ fn install_theme(ctx: &egui::Context) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
     Dashboard,
+    Protection,
     Scan,
     Quarantine,
+    Activity,
+    Settings,
     About,
 }
 
@@ -77,15 +89,26 @@ struct Done {
     bytes: u64,
 }
 
+/// A one-click action the Security Advisor can recommend.
+#[derive(Clone, Copy)]
+enum Advice {
+    QuickScan,
+    Update,
+    Quarantine,
+    Review,
+}
+
 struct TalosApp {
     view: View,
     version: String,
     tenant: Option<String>,
+    config: TalosConfig,
     hashes: usize,
     yara: usize,
     quarantined: usize,
 
     custom_path: String,
+    new_exclusion: String,
 
     rx: Option<Receiver<ScanMsg>>,
     scanning: bool,
@@ -103,6 +126,9 @@ struct TalosApp {
 
     q_items: Vec<scanner_core::QuarantineEntry>,
     q_loaded: bool,
+
+    activity: Vec<history::Event>,
+    activity_loaded: bool,
 }
 
 impl TalosApp {
@@ -112,10 +138,12 @@ impl TalosApp {
             view: View::Dashboard,
             version: env!("CARGO_PKG_VERSION").to_string(),
             tenant: std::env::var("TALOS_TENANT").ok().filter(|s| !s.is_empty()),
+            config: TalosConfig::load(),
             hashes,
             yara,
             quarantined,
             custom_path: String::new(),
+            new_exclusion: String::new(),
             rx: None,
             scanning: false,
             scan_label: String::new(),
@@ -131,6 +159,8 @@ impl TalosApp {
             update_rx: None,
             q_items: Vec::new(),
             q_loaded: false,
+            activity: Vec::new(),
+            activity_loaded: false,
         }
     }
 
@@ -141,8 +171,19 @@ impl TalosApp {
         self.quarantined = q;
     }
 
-    /// Fetch signature feeds (abuse.ch hashes + open YARA) into the store on a
-    /// background thread; the result is applied in `poll`.
+    fn reload_quarantine(&mut self) {
+        self.q_items = scanner_core::Quarantine::open(engine_glue::quarantine_dir())
+            .and_then(|q| q.list())
+            .unwrap_or_default();
+        self.q_loaded = true;
+    }
+
+    fn reload_activity(&mut self) {
+        self.activity = history::recent(200);
+        self.activity_loaded = true;
+    }
+
+    /// Fetch signature feeds on a background thread; applied in `poll`.
     fn do_update(&mut self) {
         if self.updating {
             return;
@@ -169,6 +210,52 @@ impl TalosApp {
         self.status = format!("Running {label} scan…");
         self.rx = Some(engine_glue::start_scan(targets));
         self.view = View::Scan;
+    }
+
+    fn apply_advice(&mut self, a: Advice) {
+        match a {
+            Advice::QuickScan => self.start(engine_glue::quick_scan_paths(), "Quick"),
+            Advice::Update => self.do_update(),
+            Advice::Quarantine => self.view = View::Quarantine,
+            Advice::Review => self.view = View::Scan,
+        }
+    }
+
+    /// Contextual recommendations computed from real state (Bitdefender-style).
+    fn recommendations(&self) -> Vec<(String, Option<Advice>)> {
+        let mut v = Vec::new();
+        let threats = self.last.map(|d| d.malicious + d.suspicious).unwrap_or(0);
+        if threats > 0 {
+            v.push((
+                format!("{threats} detection(s) in your last scan — review and quarantine."),
+                Some(Advice::Review),
+            ));
+        }
+        if self.quarantined > 0 {
+            v.push((
+                format!("{} item(s) waiting in Quarantine.", self.quarantined),
+                Some(Advice::Quarantine),
+            ));
+        }
+        if self.last_scan_unix == 0 {
+            v.push((
+                "You haven't run a scan yet — start with a Quick Scan.".to_string(),
+                Some(Advice::QuickScan),
+            ));
+        }
+        if self.last_update_unix == 0 {
+            v.push((
+                "Update signatures to pull the latest threat intelligence.".to_string(),
+                Some(Advice::Update),
+            ));
+        }
+        if v.is_empty() {
+            v.push((
+                "You're all set — protection is active and definitions are loaded.".to_string(),
+                None,
+            ));
+        }
+        v
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
@@ -225,6 +312,7 @@ impl TalosApp {
         if finished {
             self.rx = None;
             self.refresh_inventory();
+            self.activity_loaded = false;
         }
 
         // Drain a background feed update, if running.
@@ -236,6 +324,7 @@ impl TalosApp {
                     self.refresh_inventory();
                     self.sig_source = engine_glue::signatures_source();
                     self.last_update_unix = now_unix();
+                    self.activity_loaded = false;
                     let detail = report.messages.join(" · ");
                     self.status = format!(
                         "Update complete — {detail}  →  {} hash signatures, {} YARA files",
@@ -255,13 +344,6 @@ impl TalosApp {
             ctx.request_repaint();
         }
     }
-
-    fn reload_quarantine(&mut self) {
-        self.q_items = scanner_core::Quarantine::open(engine_glue::quarantine_dir())
-            .and_then(|q| q.list())
-            .unwrap_or_default();
-        self.q_loaded = true;
-    }
 }
 
 impl eframe::App for TalosApp {
@@ -269,18 +351,25 @@ impl eframe::App for TalosApp {
         self.poll(ctx);
 
         egui::SidePanel::left("nav")
-            .exact_width(210.0)
+            .exact_width(212.0)
             .resizable(false)
             .frame(egui::Frame::none().fill(BG).inner_margin(16.0))
             .show(ctx, |ui| self.sidebar(ui));
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(PANEL).inner_margin(22.0))
-            .show(ctx, |ui| match self.view {
-                View::Dashboard => self.dashboard(ui),
-                View::Scan => self.scan_view(ui),
-                View::Quarantine => self.quarantine_view(ui),
-                View::About => self.about(ui),
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| match self.view {
+                        View::Dashboard => self.dashboard(ui),
+                        View::Protection => self.protection(ui),
+                        View::Scan => self.scan_view(ui),
+                        View::Quarantine => self.quarantine_view(ui),
+                        View::Activity => self.activity_view(ui),
+                        View::Settings => self.settings_view(ui),
+                        View::About => self.about(ui),
+                    });
             });
     }
 }
@@ -290,11 +379,19 @@ impl TalosApp {
         ui.add_space(4.0);
         ui.label(RichText::new("◆ TALOS").color(ACCENT).size(24.0).strong());
         ui.label(RichText::new("Endpoint Protection").color(DIM).size(12.0));
-        ui.add_space(18.0);
+        ui.add_space(16.0);
 
+        nav_section(ui, "SECURITY");
         nav(ui, &mut self.view, View::Dashboard, "Dashboard");
+        nav(ui, &mut self.view, View::Protection, "Protection");
         nav(ui, &mut self.view, View::Scan, "Scan");
+        ui.add_space(10.0);
+        nav_section(ui, "MANAGE");
         nav(ui, &mut self.view, View::Quarantine, "Quarantine");
+        nav(ui, &mut self.view, View::Activity, "Activity");
+        ui.add_space(10.0);
+        nav_section(ui, "SYSTEM");
+        nav(ui, &mut self.view, View::Settings, "Settings");
         nav(ui, &mut self.view, View::About, "About");
 
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
@@ -324,13 +421,13 @@ impl TalosApp {
         } else if threats > 0 {
             (
                 ACCENT,
-                "Threats detected",
+                "Threats need attention",
                 "Review the Scan view and quarantine the findings.",
             )
         } else {
             (
                 GREEN,
-                "Protected",
+                "You're protected",
                 "On-demand engine ready · real-time sensor: Phase 2",
             )
         };
@@ -367,9 +464,7 @@ impl TalosApp {
 
         ui.add_space(12.0);
 
-        // At-a-glance metrics: an even, responsive row that scales with the
-        // window — no fixed-width tiles that wrap into stray boxes. These are
-        // distinct from the Definitions card below (which holds the breakdown).
+        // At-a-glance metrics: an even, responsive row of uniform tiles.
         let definitions = (self.hashes + self.yara).to_string();
         let last_scan = if self.last_scan_unix == 0 {
             "never".to_string()
@@ -403,7 +498,45 @@ impl TalosApp {
             );
         });
 
-        ui.add_space(10.0);
+        ui.add_space(12.0);
+
+        // Security advisor — contextual recommendations.
+        let recs = self.recommendations();
+        let mut chosen: Option<Advice> = None;
+        card(ui, CARD, |ui| {
+            ui.label(
+                RichText::new("Security advisor")
+                    .color(TEXT)
+                    .size(16.0)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new("Recommended actions for your system.")
+                    .color(DIM)
+                    .size(12.0),
+            );
+            ui.add_space(8.0);
+            for (text, advice) in &recs {
+                ui.horizontal(|ui| {
+                    let dot = if advice.is_some() { AMBER } else { GREEN };
+                    ui.label(RichText::new("●").color(dot).size(11.0));
+                    ui.label(RichText::new(text).color(TEXT).size(13.0));
+                    if let Some(a) = advice {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if secondary_button(ui, advice_label(*a)).clicked() {
+                                chosen = Some(*a);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+        if let Some(a) = chosen {
+            self.apply_advice(a);
+        }
+
+        ui.add_space(12.0);
+
         // Definitions + Update.
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
@@ -441,8 +574,9 @@ impl TalosApp {
                     };
                     let btn =
                         egui::Button::new(RichText::new(label).color(Color32::WHITE).strong())
-                            .fill(ACCENT);
-                    if ui.add_sized([150.0, 38.0], btn).clicked() {
+                            .fill(ACCENT)
+                            .min_size(egui::vec2(150.0, 38.0));
+                    if ui.add_enabled(!self.updating, btn).clicked() {
                         self.do_update();
                     }
                 });
@@ -460,6 +594,92 @@ impl TalosApp {
 
         ui.add_space(10.0);
         ui.label(RichText::new(&self.status).color(DIM).size(12.0));
+    }
+
+    fn protection(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "Protection");
+        ui.label(
+            RichText::new(
+                "Layered on-demand protection. Real-time modules arrive with the Phase-2 \
+                 kernel sensor (see docs/01).",
+            )
+            .color(DIM)
+            .size(12.0),
+        );
+        ui.add_space(10.0);
+
+        nav_section(ui, "ACTIVE");
+        module_card(
+            ui,
+            "Antimalware Engine",
+            "Exact SHA-256 hash signatures for known-bad files.",
+            ModuleStatus::Active,
+        );
+        module_card(
+            ui,
+            "YARA Rules",
+            "Pattern matching: web shells, malicious PowerShell, offensive tooling.",
+            ModuleStatus::Active,
+        );
+
+        // Real toggles wired to settings (persisted + applied on next scan).
+        let mut h = self.config.heuristics;
+        if module_toggle(
+            ui,
+            "Heuristic Analysis",
+            "Static PE checks: packing, process-injection imports, W^X sections.",
+            &mut h,
+        ) {
+            self.config.heuristics = h;
+            self.config.save();
+        }
+        let mut a = self.config.scan_archives;
+        if module_toggle(
+            ui,
+            "Archive Inspection",
+            "Look inside ZIP archives (zip-bomb-guarded).",
+            &mut a,
+        ) {
+            self.config.scan_archives = a;
+            self.config.save();
+        }
+
+        module_card(
+            ui,
+            "Quarantine Vault",
+            "Isolate detected files and restore false positives.",
+            ModuleStatus::Active,
+        );
+        module_card(
+            ui,
+            "Signature Updates",
+            "abuse.ch malware hashes + open YARA feeds, on demand.",
+            ModuleStatus::Active,
+        );
+
+        ui.add_space(12.0);
+        nav_section(ui, "ROADMAP · PHASE 2 (KERNEL SENSOR)");
+        for (name, desc) in [
+            (
+                "Real-time Protection",
+                "On-access scanning via a file-system minifilter.",
+            ),
+            (
+                "Web Protection",
+                "Block malicious URLs and phishing in the browser.",
+            ),
+            ("Firewall", "Application-aware network filtering (WFP)."),
+            (
+                "Ransomware Remediation",
+                "Behavioral rollback of unauthorized encryption.",
+            ),
+            (
+                "Banking & Payment",
+                "Hardened isolated browser for transactions.",
+            ),
+        ] {
+            module_card(ui, name, desc, ModuleStatus::Roadmap);
+        }
     }
 
     fn scan_view(&mut self, ui: &mut egui::Ui) {
@@ -537,6 +757,7 @@ impl TalosApp {
         if !self.threats.is_empty() {
             ui.add_space(8.0);
             let malicious = self.threats.iter().filter(|r| r.is_malicious()).count();
+            let mut do_quarantine = false;
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(format!("Detections ({})", self.threats.len()))
@@ -547,17 +768,22 @@ impl TalosApp {
                     && !self.scanning
                     && secondary_button(ui, &format!("Quarantine {malicious}")).clicked()
                 {
-                    match engine_glue::quarantine_reports(&self.threats) {
-                        Ok(n) => {
-                            self.status = format!("Quarantined {n} item(s).");
-                            self.threats.retain(|r| !r.is_malicious());
-                            self.q_loaded = false;
-                            self.refresh_inventory();
-                        }
-                        Err(e) => self.status = format!("Quarantine failed: {e}"),
-                    }
+                    do_quarantine = true;
                 }
             });
+            if do_quarantine {
+                match engine_glue::quarantine_reports(&self.threats) {
+                    Ok(n) => {
+                        self.status = format!("Quarantined {n} item(s).");
+                        history::record("quarantine", format!("Quarantined {n} item(s)"));
+                        self.threats.retain(|r| !r.is_malicious());
+                        self.q_loaded = false;
+                        self.activity_loaded = false;
+                        self.refresh_inventory();
+                    }
+                    Err(e) => self.status = format!("Quarantine failed: {e}"),
+                }
+            }
 
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -638,13 +864,200 @@ impl TalosApp {
         if let Some((act, id)) = action {
             if let Ok(store) = scanner_core::Quarantine::open(engine_glue::quarantine_dir()) {
                 let _ = match act {
-                    Act::Restore => store.restore(&id, None).map(|_| ()),
-                    Act::Purge => store.purge(&id),
+                    Act::Restore => {
+                        history::record("quarantine", "Restored an item from quarantine");
+                        store.restore(&id, None).map(|_| ())
+                    }
+                    Act::Purge => {
+                        history::record("quarantine", "Deleted an item from quarantine");
+                        store.purge(&id)
+                    }
                 };
             }
             self.status = "Quarantine updated.".to_string();
+            self.activity_loaded = false;
             self.reload_quarantine();
             self.refresh_inventory();
+        }
+    }
+
+    fn activity_view(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "Activity");
+        if !self.activity_loaded {
+            self.reload_activity();
+        }
+        ui.horizontal(|ui| {
+            if secondary_button(ui, "Refresh").clicked() {
+                self.reload_activity();
+            }
+            ui.label(RichText::new(format!("{} event(s)", self.activity.len())).color(DIM));
+        });
+        ui.add_space(6.0);
+
+        if self.activity.is_empty() {
+            card(ui, CARD, |ui| {
+                ui.label(
+                    RichText::new("No activity yet. Run a scan or update signatures.").color(DIM),
+                );
+            });
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for e in &self.activity {
+                    card(ui, CARD, |ui| {
+                        ui.horizontal(|ui| {
+                            let col = match e.kind.as_str() {
+                                "scan" => GREEN,
+                                "update" => AMBER,
+                                "quarantine" => ACCENT,
+                                _ => DIM,
+                            };
+                            ui.label(RichText::new("●").color(col).size(13.0));
+                            ui.add_space(4.0);
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&e.summary).color(TEXT).size(12.0));
+                                ui.label(RichText::new(time_ago(e.unix)).color(DIM).size(11.0));
+                            });
+                        });
+                    });
+                }
+            });
+    }
+
+    fn settings_view(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "Settings");
+        let mut dirty = false;
+
+        // --- Scan engine ---
+        card(ui, CARD, |ui| {
+            ui.label(RichText::new("Scan engine").color(TEXT).size(16.0).strong());
+            ui.add_space(6.0);
+            if ui
+                .add(
+                    egui::Slider::new(&mut self.config.max_size_mib, 1..=1024)
+                        .text("Max file size for content/YARA scan (MiB)"),
+                )
+                .changed()
+            {
+                dirty = true;
+            }
+            if ui
+                .checkbox(
+                    &mut self.config.scan_archives,
+                    "Inspect inside ZIP archives",
+                )
+                .changed()
+            {
+                dirty = true;
+            }
+            if ui
+                .checkbox(
+                    &mut self.config.heuristics,
+                    "Static PE heuristics (packing / injection / W^X)",
+                )
+                .changed()
+            {
+                dirty = true;
+            }
+            if ui
+                .checkbox(&mut self.config.follow_symlinks, "Follow symbolic links")
+                .changed()
+            {
+                dirty = true;
+            }
+        });
+        ui.add_space(10.0);
+
+        // --- Exclusions ---
+        card(ui, CARD, |ui| {
+            ui.label(RichText::new("Exclusions").color(TEXT).size(16.0).strong());
+            ui.label(
+                RichText::new("Trusted files or folders to skip during scans.")
+                    .color(DIM)
+                    .size(12.0),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_exclusion)
+                        .desired_width(420.0)
+                        .hint_text("C:\\path\\to\\trusted  (file or folder)"),
+                );
+                if secondary_button(ui, "Add").clicked() {
+                    let p = self.new_exclusion.trim().to_string();
+                    if !p.is_empty() && !self.config.exclusions.contains(&p) {
+                        self.config.exclusions.push(p);
+                        self.new_exclusion.clear();
+                        dirty = true;
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            let mut remove: Option<usize> = None;
+            for (i, ex) in self.config.exclusions.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(ex).color(TEXT).size(12.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Remove").clicked() {
+                            remove = Some(i);
+                        }
+                    });
+                });
+            }
+            if let Some(i) = remove {
+                self.config.exclusions.remove(i);
+                dirty = true;
+            }
+            if self.config.exclusions.is_empty() {
+                ui.label(
+                    RichText::new("No exclusions configured.")
+                        .color(DIM)
+                        .size(12.0),
+                );
+            }
+        });
+        ui.add_space(10.0);
+
+        // --- Scheduled scan ---
+        card(ui, CARD, |ui| {
+            ui.label(
+                RichText::new("Scheduled scan")
+                    .color(TEXT)
+                    .size(16.0)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new(
+                    "Saved now; runs automatically once the Phase-2 background service ships.",
+                )
+                .color(DIM)
+                .size(11.0),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                for s in [Schedule::Off, Schedule::Daily, Schedule::Weekly] {
+                    if ui
+                        .selectable_value(&mut self.config.schedule, s, s.label())
+                        .changed()
+                    {
+                        dirty = true;
+                    }
+                }
+            });
+        });
+
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Settings are saved automatically and apply to your next scan.")
+                .color(DIM)
+                .size(11.0),
+        );
+
+        if dirty {
+            self.config.save();
         }
     }
 
@@ -672,8 +1085,9 @@ impl TalosApp {
             ui.add_space(8.0);
             ui.label(
                 RichText::new(
-                    "Detected files can be quarantined and restored. Real-time kernel sensor, \
-                     ML and cloud are on the roadmap.",
+                    "Signature feeds: abuse.ch (CC0) + open YARA (DRL) + optional ClamAV (GPL). \
+                     See THIRD-PARTY-NOTICES.md. Real-time kernel sensor, ML and cloud are on the \
+                     roadmap.",
                 )
                 .color(DIM),
             );
@@ -686,12 +1100,17 @@ impl TalosApp {
 fn nav(ui: &mut egui::Ui, current: &mut View, target: View, label: &str) {
     let selected = *current == target;
     let resp = ui.add_sized(
-        [ui.available_width(), 36.0],
+        [ui.available_width(), 34.0],
         egui::SelectableLabel::new(selected, RichText::new(label).size(15.0)),
     );
     if resp.clicked() {
         *current = target;
     }
+}
+
+fn nav_section(ui: &mut egui::Ui, text: &str) {
+    ui.label(RichText::new(text).color(DIM).size(10.5).strong());
+    ui.add_space(2.0);
 }
 
 fn heading(ui: &mut egui::Ui, text: &str) {
@@ -732,6 +1151,60 @@ fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, value_col: Color32, un
         });
 }
 
+#[derive(Clone, Copy)]
+enum ModuleStatus {
+    Active,
+    Roadmap,
+}
+
+/// A protection-module row: title + description on the left, a status dot on
+/// the right (Malwarebytes / Bitdefender Protection-tab style).
+fn module_card(ui: &mut egui::Ui, name: &str, desc: &str, status: ModuleStatus) {
+    card(ui, CARD, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new(name).color(TEXT).size(15.0).strong());
+                ui.label(RichText::new(desc).color(DIM).size(12.0));
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let (txt, col) = match status {
+                    ModuleStatus::Active => ("ACTIVE", GREEN),
+                    ModuleStatus::Roadmap => ("ROADMAP", DIM),
+                };
+                ui.label(
+                    RichText::new(format!("● {txt}"))
+                        .color(col)
+                        .size(12.0)
+                        .strong(),
+                );
+            });
+        });
+    });
+    ui.add_space(8.0);
+}
+
+/// Like [`module_card`] but with a real on/off toggle; returns whether the
+/// toggle changed this frame.
+fn module_toggle(ui: &mut egui::Ui, name: &str, desc: &str, on: &mut bool) -> bool {
+    let mut changed = false;
+    card(ui, CARD, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new(name).color(TEXT).size(15.0).strong());
+                ui.label(RichText::new(desc).color(DIM).size(12.0));
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label = if *on { "On" } else { "Off" };
+                if ui.toggle_value(on, label).changed() {
+                    changed = true;
+                }
+            });
+        });
+    });
+    ui.add_space(8.0);
+    changed
+}
+
 fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add_sized(
         [ui.available_width().min(220.0), 40.0],
@@ -747,9 +1220,18 @@ fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 
 fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add_sized(
-        [140.0, 36.0],
+        [120.0, 34.0],
         egui::Button::new(RichText::new(text).color(TEXT)),
     )
+}
+
+fn advice_label(a: Advice) -> &'static str {
+    match a {
+        Advice::QuickScan => "Quick Scan",
+        Advice::Update => "Update",
+        Advice::Quarantine => "Review",
+        Advice::Review => "Open Scan",
+    }
 }
 
 fn sev_color(s: Severity) -> Color32 {

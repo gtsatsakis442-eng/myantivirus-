@@ -60,6 +60,7 @@ pub fn run_scan(engine: &Engine, targets: &[PathBuf], params: &ScanParams) -> Sc
         follow_symlinks: params.follow_symlinks,
         max_depth: None,
         threads: params.threads,
+        ..Default::default()
     };
     let scanner = Scanner::with_options(engine, options);
 

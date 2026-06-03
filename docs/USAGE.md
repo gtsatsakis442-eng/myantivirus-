@@ -56,8 +56,24 @@ See [deployment](04-deployment-distribution.md) for GPO/Intune/SCCM.
 
 ## 3. Run it
 
-### Interactive app (easiest)
-Run with **no arguments** (or double-click the `.exe`):
+### Desktop GUI (recommended)
+Double-click **`talos-gui.exe`** to open the security console:
+
+- **Dashboard** — a protection-status hero plus a **Security Advisor** that
+  suggests one-click actions (run a scan, update signatures, review quarantine)
+  based on your real state.
+- **Protection** — a module grid: **Active** layers (antimalware, YARA,
+  heuristics, archive inspection, quarantine, updates) with on/off toggles, and
+  **Roadmap** modules (real-time, web, firewall, ransomware) clearly labeled.
+- **Scan** — Quick / Full / Custom with live progress and per-detection results.
+- **Quarantine** — isolate / restore / delete.
+- **Activity** — a persisted log of scans, updates and quarantine actions.
+- **Settings** — *real* engine controls: file-size cap, **exclusions** (trusted
+  files/folders the scanner skips), archive / heuristics / symlink toggles, and a
+  scheduled-scan preference. Saved to `config.json` and applied to the next scan.
+
+### Interactive console app
+Run with **no arguments** (or double-click `talos.exe`):
 ```bash
 talos
 ```
@@ -116,6 +132,8 @@ in a writable per-machine store that the engine merges on top of the baseline.
 | Built-in baseline (hash DB + YARA) | embedded in `talos.exe` / `talos-gui.exe` |
 | Updatable definitions store | `%PROGRAMDATA%\Talos EPP\signatures` (Windows) or `~/.local/share/talos-epp/signatures` — `hashes/*.hashdb` + `yara/*.yar` |
 | Quarantine vault | `%PROGRAMDATA%\Talos EPP\quarantine` (Windows) or `~/.local/share/talos-epp/quarantine` |
+| GUI settings | `…\Talos EPP\config.json` (file-size cap, exclusions, toggles, schedule) |
+| Activity log | `…\Talos EPP\activity.jsonl` (scans, updates, quarantine actions) |
 
 Override the quarantine location with `scan --quarantine-dir <dir>` or
 `quarantine --dir <dir>`. Add extra signatures ad-hoc with `scan --hashes <file>`
