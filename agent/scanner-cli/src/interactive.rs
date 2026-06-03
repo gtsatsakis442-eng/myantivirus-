@@ -43,7 +43,7 @@ pub fn run() -> Result<()> {
                 }
             }
             "4" => quarantine_menu()?,
-            "5" => update_info(),
+            "5" => update_signatures()?,
             "6" => about(),
             "7" => help(),
             "8" => dashboard(&info),
@@ -120,7 +120,7 @@ fn menu() {
     item("3", "Custom Scan", "choose a file or folder");
     item("4", "Quarantine", "list / restore / purge isolated files");
     ui::section("System");
-    item("5", "Update info", "how signatures are delivered");
+    item("5", "Update", "fetch latest signatures from the feeds");
     item("6", "About", "product information");
     item("7", "Help", "how to use the console");
     item("8", "Refresh status", "redraw the dashboard");
@@ -157,11 +157,7 @@ fn scan(targets: Vec<PathBuf>, label: &str) -> Result<()> {
         ))
     );
 
-    let cfg = EngineConfig {
-        hashes: paths::default_hashes(),
-        rules: paths::default_rules(),
-        no_yara: false,
-    };
+    let cfg = EngineConfig::default();
     let (engine, hashes, yara_files) = match runner::load_engine(&cfg) {
         Ok(v) => v,
         Err(e) => {
@@ -286,6 +282,7 @@ fn help() {
     println!("  [2] Full Scan   — the whole system (can take a while).");
     println!("  [3] Custom Scan — enter any file or folder path.");
     println!("  [4] Quarantine  — review isolated threats; restore or delete.");
+    println!("  [5] Update      — fetch the latest signatures from the feeds.");
     println!("  [8] Refresh     — redraw the status dashboard.");
     println!();
     println!("  Malicious files can be quarantined (isolated + removed) and");
@@ -294,14 +291,46 @@ fn help() {
     println!("  scanned inside. Full guide: docs/USAGE.md.");
 }
 
-fn update_info() {
-    ui::section("Updates");
-    println!("  Signatures update via the secure, staged channel (delta + TUF");
-    println!("  integrity), on a 48h baseline plus an emergency channel.");
+/// Fetch the openly-licensed signature feeds into the local store, then reload.
+fn update_signatures() -> Result<()> {
+    ui::section("Update Signatures");
+    println!("  Pulls openly-licensed detection content into your local store:");
+    println!(
+        "    {} abuse.ch MalwareBazaar — recent malware SHA-256 hashes (CC0)",
+        ui::green("•")
+    );
+    println!(
+        "    {} Open YARA rules — Neo23x0/signature-base (DRL)",
+        ui::green("•")
+    );
     println!(
         "  {}",
-        ui::dim("See docs/03-secure-updates.md. Online client lands in a later phase.")
+        ui::dim("ClamAV SHA-256 (GPL) is opt-in: talos update --clamav-url <url>")
     );
+    println!(
+        "  {}",
+        ui::dim("Production uses the signed, staged delta channel — see docs/03.")
+    );
+
+    if !confirm("Fetch updates now (requires internet)? [y/N] ")? {
+        return Ok(());
+    }
+    println!("  {}", ui::dim("Updating… this can take a moment."));
+    let report =
+        scanner_core::feeds::update(&paths::store_dir(), &scanner_core::UpdateOptions::default());
+    for m in &report.messages {
+        println!("  {m}");
+    }
+    match runner::load_engine(&EngineConfig::default()) {
+        Ok((_, h, y)) => println!(
+            "  {}",
+            ui::green(&format!(
+                "Definitions now: {h} hash signatures, {y} YARA files"
+            ))
+        ),
+        Err(e) => println!("  {}", ui::red(&format!("reload failed: {e:#}"))),
+    }
+    Ok(())
 }
 
 fn prompt(p: &str) -> Result<String> {

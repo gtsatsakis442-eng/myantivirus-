@@ -29,6 +29,10 @@ pub enum ScanError {
     /// An archive could not be opened or read.
     #[error("archive error: {0}")]
     Archive(String),
+
+    /// A signature update (feed fetch / parse) failed.
+    #[error("update error: {0}")]
+    Update(String),
 }
 
 /// Convenience result alias used throughout the engine.

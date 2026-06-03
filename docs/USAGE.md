@@ -17,7 +17,7 @@ Talos scans files and flags threats using three layers:
 |---|---|---|
 | **Hash signatures** | exact known-bad files (SHA-256) | malicious |
 | **YARA rules** | known patterns (EICAR, web shells, malicious PowerShell) | malicious |
-| **Static heuristics** | packed/high-entropy PEs, process-injection imports, W^X sections | **suspicious** |
+| **Static heuristics** | packed **code** sections, process-injection imports, W^X sections — needs **≥2 signals**; Authenticode-signed files are trusted | **suspicious** |
 
 It also looks **inside ZIP archives**, and can **quarantine** (isolate) detected
 files and later **restore** them.
@@ -25,6 +25,10 @@ files and later **restore** them.
 - *Malicious* findings can be quarantined (and are, with `--quarantine`).
 - *Suspicious* findings are reported but **never** auto-quarantined (so a
   legitimately packed installer is flagged, not deleted).
+- To keep false positives low, the heuristic layer **trusts code-signed
+  (Authenticode) binaries** — so signed Microsoft/vendor DLLs are not flagged —
+  and only raises *suspicious* when **two or more** independent signals agree.
+  Known-bad files are still caught by the hash and YARA layers regardless.
 
 ---
 
@@ -52,13 +56,29 @@ See [deployment](04-deployment-distribution.md) for GPO/Intune/SCCM.
 
 ## 3. Run it
 
-### Interactive app (easiest)
-Run with **no arguments** (or double-click the `.exe`):
+### Desktop GUI (recommended)
+Double-click **`talos-gui.exe`** to open the security console:
+
+- **Dashboard** — a protection-status hero plus a **Security Advisor** that
+  suggests one-click actions (run a scan, update signatures, review quarantine)
+  based on your real state.
+- **Protection** — a module grid: **Active** layers (antimalware, YARA,
+  heuristics, archive inspection, quarantine, updates) with on/off toggles, and
+  **Roadmap** modules (real-time, web, firewall, ransomware) clearly labeled.
+- **Scan** — Quick / Full / Custom with live progress and per-detection results.
+- **Quarantine** — isolate / restore / delete.
+- **Activity** — a persisted log of scans, updates and quarantine actions.
+- **Settings** — *real* engine controls: file-size cap, **exclusions** (trusted
+  files/folders the scanner skips), archive / heuristics / symlink toggles, and a
+  scheduled-scan preference. Saved to `config.json` and applied to the next scan.
+
+### Interactive console app
+Run with **no arguments** (or double-click `talos.exe`):
 ```bash
 talos
 ```
 You get a menu: **Quick Scan**, **Full Scan**, **Custom Scan**, **Quarantine**
-manager, **Update info**, **About**, and **Help**.
+manager, **Update** (fetch the latest signatures), **About**, and **Help**.
 
 ### Command line
 ```bash
@@ -69,6 +89,7 @@ talos scan /path/to/dir             # scan a specific path
 talos scan /path --quarantine       # scan and isolate threats
 talos scan /path --json             # NDJSON output (one report/line)
 talos scan /path --show-clean       # also list clean files
+talos update                        # fetch the latest signatures (see §6)
 ```
 
 ### Quarantine management
@@ -94,7 +115,7 @@ talos quarantine purge --all        # empty the vault
 | `--threads <N>` | worker threads for directory scans (`0` = all CPU cores) | 0 |
 | `--follow-symlinks` | follow symlinks while walking | off |
 | `--no-yara` | hash-only (skip YARA) | off |
-| `--hashes <file>` / `--rules <dir>` | override signature locations | install dir |
+| `--hashes <file>` / `--rules <dir>` | merge extra signatures on top of the built-in baseline + local store | — |
 
 **Exit codes:** `0` clean · `1` threat detected · `2` error.
 
@@ -102,21 +123,65 @@ talos quarantine purge --all        # empty the vault
 
 ## 5. Where things live
 
+The app is **self-contained**: a baseline of signatures is **embedded in the
+binary**, so it detects threats out of the box with no extra files. Updates land
+in a writable per-machine store that the engine merges on top of the baseline.
+
 | What | Location |
 |---|---|
-| Signatures (hash DB + YARA) | next to the exe under `signatures/`, else `./signatures` |
+| Built-in baseline (hash DB + YARA) | embedded in `talos.exe` / `talos-gui.exe` |
+| Updatable definitions store | `%PROGRAMDATA%\Talos EPP\signatures` (Windows) or `~/.local/share/talos-epp/signatures` — `hashes/*.hashdb` + `yara/*.yar` |
 | Quarantine vault | `%PROGRAMDATA%\Talos EPP\quarantine` (Windows) or `~/.local/share/talos-epp/quarantine` |
+| GUI settings | `…\Talos EPP\config.json` (file-size cap, exclusions, toggles, schedule) |
+| Activity log | `…\Talos EPP\activity.jsonl` (scans, updates, quarantine actions) |
 
 Override the quarantine location with `scan --quarantine-dir <dir>` or
-`quarantine --dir <dir>`.
+`quarantine --dir <dir>`. Add extra signatures ad-hoc with `scan --hashes <file>`
+/ `scan --rules <dir>` (merged on top of the baseline + store).
 
 ---
 
 ## 6. Updating signatures
 
-In this phase, signatures ship with the app. Production updates flow over the
-secure, staged channel (delta + TUF integrity, 48h baseline + emergency push) —
-see [docs/03](03-secure-updates.md). Run `talos update` for a summary.
+A baseline ships embedded in the app. To **broaden detection**, `talos update`
+fetches reputable, openly-licensed feeds into the local store (§5), and the
+engine reloads them immediately. The GUI exposes the same thing as the
+**Update** button on the dashboard; the interactive console offers it as menu
+item **[5]**.
+
+```bash
+talos update                          # abuse.ch hashes + open YARA rules (defaults)
+talos update --no-abuse-ch            # skip the abuse.ch hash feed
+talos update --no-yara-feeds          # skip the open YARA rule feeds
+talos update --clamav-url <url>       # also pull a ClamAV .hsb SHA-256 list (opt-in)
+```
+
+### Sources
+
+| Feed | Content | License | Default |
+|---|---|---|---|
+| **abuse.ch MalwareBazaar** | recent malware **SHA-256** hashes | CC0 (public domain) | **on** |
+| **Open YARA** (Neo23x0/signature-base) | curated `*.yar` rules (web shells, offensive tooling, APT/Cobalt Strike, exploits, AMSI tampering) | DRL 1.1 | **on** |
+| **ClamAV** | `.hsb` **SHA-256** hash signatures (MD5 lines skipped) | GPL-2.0 | off (opt-in) |
+
+Talos ingests only **SHA-256** hash entries (the engine is SHA-256-keyed). YARA
+rule files our engine can't compile (unsupported modules/features) are **skipped
+gracefully** — one bad rule never breaks the set. Downloads use the system
+`curl`, so there's no in-process TLS to maintain. Full attribution and license
+terms are in [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
+
+### Tuning via environment variables
+
+| Variable | Effect |
+|---|---|
+| `TALOS_ABUSE_KEY` | abuse.ch Auth-Key (sent as the `Auth-Key` header) for endpoints that require one |
+| `TALOS_YARA_URLS` | comma-separated list of YARA URLs to fetch instead of the defaults |
+| `TALOS_CLAMAV_URL` | a ClamAV `.hsb` SHA-256 list URL (same as `--clamav-url`) |
+
+> **Production roadmap.** The hardened path is the signed, staged **delta + TUF**
+> channel (48h baseline + emergency push) described in
+> [docs/03](03-secure-updates.md). `talos update` is the Phase-1 fetcher that
+> proves the multi-source ingestion end-to-end.
 
 ---
 
@@ -135,8 +200,10 @@ talos selftest               # -> SELFTEST PASSED
 
 | Symptom | Fix |
 |---|---|
-| `loading hash database ... No such file` | run from the install dir, or pass `--hashes`/`--rules` |
 | `provide a PATH or --profile` | give a path or `--profile quick\|full` |
+| `talos update` says `curl unavailable` | install `curl` (built into Windows 10+/most Linux), or check connectivity |
+| `abuse.ch: download failed` | the endpoint may need a free key — set `TALOS_ABUSE_KEY`, or run `talos update --no-abuse-ch` |
+| `YARA …: not a rule file` / a feed is skipped | the source changed or won't compile; it's skipped safely — other feeds still apply |
 | Quarantine `list` is empty after `--quarantine-dir` | pass the same `--dir` to `quarantine list` |
 | Large file shows `content_inspected: false` | it exceeded `--max-size-mib`; it was hash-checked only |
 | Windows "Unknown Publisher" warning | expected until the production EV signature is applied ([docs/04](04-deployment-distribution.md)) |

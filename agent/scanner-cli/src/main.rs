@@ -39,10 +39,23 @@ enum Command {
         #[command(subcommand)]
         action: QuarantineAction,
     },
-    /// Explain how signature updates are delivered.
-    Update,
+    /// Fetch & install signature feeds into the local store (broadens detection).
+    Update(UpdateArgs),
     /// Self-test: scan an EICAR sample to verify detection works end-to-end.
     Selftest,
+}
+
+#[derive(Args, Debug)]
+struct UpdateArgs {
+    /// Skip the abuse.ch MalwareBazaar hash feed (CC0).
+    #[arg(long)]
+    no_abuse_ch: bool,
+    /// Skip the open YARA rule feeds.
+    #[arg(long)]
+    no_yara_feeds: bool,
+    /// Also pull a ClamAV `.hsb` SHA-256 list from this URL (GPL).
+    #[arg(long)]
+    clamav_url: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -116,11 +129,32 @@ fn main() -> ExitCode {
         },
         Some(Command::Scan(args)) => cmd_scan(args),
         Some(Command::Quarantine { dir, action }) => cmd_quarantine(dir, action),
-        Some(Command::Update) => {
-            print_update_info();
+        Some(Command::Update(args)) => cmd_update(args),
+        Some(Command::Selftest) => cmd_selftest(),
+    }
+}
+
+fn cmd_update(args: UpdateArgs) -> ExitCode {
+    let opts = scanner_core::UpdateOptions {
+        abuse_ch: !args.no_abuse_ch,
+        open_yara: !args.no_yara_feeds,
+        clamav: args.clamav_url.is_some(),
+        clamav_url: args.clamav_url,
+        ..Default::default()
+    };
+    let store = paths::store_dir();
+    eprintln!("Updating signatures into {} …", store.display());
+    let report = scanner_core::feeds::update(&store, &opts);
+    for m in &report.messages {
+        println!("  {m}");
+    }
+    // Reload to report the new totals.
+    match runner::load_engine(&EngineConfig::default()) {
+        Ok((_, h, y)) => {
+            println!("Definitions now: {h} hash signatures, {y} YARA files.");
             ExitCode::SUCCESS
         }
-        Some(Command::Selftest) => cmd_selftest(),
+        Err(e) => fail(e),
     }
 }
 
@@ -129,11 +163,7 @@ const EICAR: &[u8] = br#"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TE
 
 fn cmd_selftest() -> ExitCode {
     let result = (|| -> Result<bool> {
-        let cfg = EngineConfig {
-            hashes: paths::default_hashes(),
-            rules: paths::default_rules(),
-            no_yara: false,
-        };
+        let cfg = EngineConfig::default();
         let (engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
         println!("engine: {hash_count} hash signature(s), {yara_files} YARA file(s)");
 
@@ -173,8 +203,8 @@ fn cmd_scan(args: ScanArgs) -> ExitCode {
     let outcome = (|| -> Result<bool> {
         let targets = resolve_targets(&args)?;
         let cfg = EngineConfig {
-            hashes: args.hashes.clone().unwrap_or_else(paths::default_hashes),
-            rules: args.rules.clone().unwrap_or_else(paths::default_rules),
+            hashes: args.hashes.clone(),
+            rules: args.rules.clone(),
             no_yara: args.no_yara,
         };
         let (engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
@@ -278,12 +308,6 @@ fn cmd_quarantine(dir: Option<PathBuf>, action: QuarantineAction) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => fail(e),
     }
-}
-
-fn print_update_info() {
-    println!("Signature updates are delivered via the secure, staged update channel");
-    println!("(delta + TUF integrity) on a 48h baseline plus an emergency channel.");
-    println!("See docs/03-secure-updates.md. (Online update client lands in a later phase.)");
 }
 
 fn fail(e: anyhow::Error) -> ExitCode {

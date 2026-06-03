@@ -35,6 +35,11 @@ pub struct ScanOptions {
     pub max_depth: Option<usize>,
     /// Worker threads for parallel directory scans (`0` = all available cores).
     pub threads: usize,
+    /// Paths to skip. A file is excluded if it equals, or lives under, any of
+    /// these (user-configured trusted folders/files).
+    pub exclusions: Vec<PathBuf>,
+    /// Whether to look inside ZIP archives. Disable for faster, shallower scans.
+    pub scan_archives: bool,
 }
 
 impl Default for ScanOptions {
@@ -44,6 +49,8 @@ impl Default for ScanOptions {
             follow_symlinks: false,
             max_depth: None,
             threads: 0,
+            exclusions: Vec::new(),
+            scan_archives: true,
         }
     }
 }
@@ -66,6 +73,12 @@ impl<'e> Scanner<'e> {
         Self { engine, options }
     }
 
+    /// True if `path` equals or lives under any configured exclusion.
+    fn is_excluded(&self, path: &Path) -> bool {
+        let ex = &self.options.exclusions;
+        !ex.is_empty() && ex.iter().any(|e| path == e || path.starts_with(e))
+    }
+
     /// Scan a single path. Always returns a report (never panics).
     pub fn scan_file(&self, path: &Path) -> ScanReport {
         self.scan_file_with(path, None)
@@ -78,6 +91,12 @@ impl<'e> Scanner<'e> {
         yara_scanner: Option<&mut yara_x::Scanner<'_>>,
     ) -> ScanReport {
         let start = Instant::now();
+
+        // User-configured exclusions (trusted paths) are skipped outright.
+        if self.is_excluded(path) {
+            let size = fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0);
+            return ScanReport::skipped(path, size, start);
+        }
 
         let meta = match fs::symlink_metadata(path) {
             Ok(m) => m,
@@ -129,9 +148,11 @@ impl<'e> Scanner<'e> {
 
         // If the file is a ZIP, scan its entries and fold any findings into this
         // report (so an infected archive is flagged as the archive that it is).
-        if let Some(bytes) = content.as_deref() {
-            if archive::looks_like_zip(bytes) {
-                scan_archive_entries(self.engine, bytes, &mut detections);
+        if self.options.scan_archives {
+            if let Some(bytes) = content.as_deref() {
+                if archive::looks_like_zip(bytes) {
+                    scan_archive_entries(self.engine, bytes, &mut detections);
+                }
             }
         }
 
@@ -322,5 +343,65 @@ mod tests {
             1,
             "only EICAR is malicious"
         );
+    }
+
+    fn eicar_engine() -> Engine {
+        let yara = YaraEngine::from_sources([(
+            "eicar",
+            r#"rule Eicar { strings: $s = "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!" condition: $s }"#,
+        )])
+        .unwrap();
+        Engine::new(HashSignatureDb::new(), Some(yara))
+    }
+
+    #[test]
+    fn excluded_path_is_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let evil = dir.path().join("eicar.com");
+        std::fs::write(&evil, EICAR).unwrap();
+
+        let engine = eicar_engine();
+        let opts = ScanOptions {
+            exclusions: vec![evil.clone()],
+            ..Default::default()
+        };
+        let scanner = Scanner::with_options(&engine, opts);
+
+        let report = scanner.scan_file(&evil);
+        assert!(
+            !report.is_malicious(),
+            "an excluded file must not be flagged"
+        );
+        assert_eq!(report.disposition, crate::Disposition::Skipped);
+    }
+
+    #[test]
+    fn archive_scanning_can_be_disabled() {
+        let mut zip_bytes = Vec::new();
+        {
+            let mut zw = zip::ZipWriter::new(Cursor::new(&mut zip_bytes));
+            zw.start_file("eicar.com", SimpleFileOptions::default())
+                .unwrap();
+            zw.write_all(EICAR).unwrap();
+            zw.finish().unwrap();
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let zpath = dir.path().join("bundle.zip");
+        std::fs::write(&zpath, &zip_bytes).unwrap();
+
+        let engine = eicar_engine();
+        let opts = ScanOptions {
+            scan_archives: false,
+            ..Default::default()
+        };
+        let scanner = Scanner::with_options(&engine, opts);
+        assert!(
+            !scanner.scan_file(&zpath).is_malicious(),
+            "with archive scanning off, the zip interior is not inspected"
+        );
+
+        // Sanity: default options (archives on) still catch it.
+        let scanner_on = Scanner::new(&engine);
+        assert!(scanner_on.scan_file(&zpath).is_malicious());
     }
 }

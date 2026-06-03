@@ -1,6 +1,8 @@
 # Talos EPP — Enterprise Endpoint Protection Platform
 
-> **Status:** Architecture & Roadmap (Design Phase — no production code yet)
+> **Status:** Phase 1 shipping — working GUI + CLI app (multi-layer on-demand
+> scanner with live signature updates). Phases 2+ (kernel sensor, ML, cloud)
+> remain design/roadmap.
 > **Target:** Standalone, EV-signed Windows executable + WHQL-signed kernel sensor
 > **Audience:** Engineering, Security Research, Product, Compliance
 
@@ -68,6 +70,7 @@ This is a **defensive security product**. Everything here is intended for the
 ├── installer/             WiX MSI + Burn bootstrapper + code-signing simulation
 ├── kernel/                Phase 2 kernel sensor (placeholder)
 ├── cloud/  ml/  tools/    Later-phase placeholders
+├── THIRD-PARTY-NOTICES.md Signature-feed sources, licenses & attribution
 └── .github/workflows/     CI: Linux engine gates + Windows installer + signing sim
 ```
 
@@ -83,8 +86,39 @@ Directory scans run **in parallel across all CPU cores** (tune with `--threads`)
 and report throughput. The ONNX static-ML layer is intentionally deferred until
 the file-processing pipeline is hardened (see `ml/`).
 
+**Live signature updates.** A baseline ships **embedded** in the binaries, and
+`talos update` (CLI), the GUI **Update** button, or interactive menu **[5]**
+broaden detection by fetching reputable, openly-licensed feeds into a writable
+store the engine reloads on the spot:
+
+| Feed | Content | License | Default |
+|---|---|---|---|
+| **abuse.ch MalwareBazaar** | recent malware SHA-256 hashes | CC0 | on |
+| **Open YARA** (Neo23x0/signature-base) | curated rules: web shells, offensive tooling, APT/Cobalt Strike, exploits, AMSI tampering | DRL 1.1 | on |
+| **ClamAV** | `.hsb` SHA-256 signatures | GPL-2.0 | opt-in (`--clamav-url`) |
+
+Only SHA-256 hash entries are ingested; incompatible YARA rules are skipped
+gracefully. Sources, licenses, and attribution:
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+**Desktop GUI** — a dark security console modeled on the patterns that make the
+leading suites (Bitdefender, Malwarebytes, ESET, Kaspersky) approachable:
+
+| Area | What it gives you |
+|---|---|
+| **Dashboard** | protection-status hero + a **Security Advisor** that recommends contextual actions (run a scan, update, review quarantine) computed from real state |
+| **Protection** | a module grid showing **Active** layers (antimalware, YARA, heuristics, archive inspection, quarantine, updates) with on/off toggles, and **Roadmap** modules (real-time, web, firewall, ransomware) honestly labeled — not faked "on" |
+| **Scan** | Quick / Full / Custom with live progress and per-detection results |
+| **Quarantine** | isolate, restore, delete |
+| **Activity** | a persisted log of scans, updates and quarantine actions |
+| **Settings** | real engine controls — file-size cap, **exclusions** (trusted paths the scanner skips), archive/heuristics/symlink toggles, scheduled-scan preference — saved to `config.json` and applied to the next scan |
+
+To keep false positives low, the heuristic layer **trusts Authenticode-signed
+binaries** (so signed Microsoft/vendor DLLs aren't flagged) and only raises
+*suspicious* when **two or more** independent signals agree.
+
 📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
-quarantine, troubleshooting.
+**updating signatures**, quarantine, troubleshooting.
 
 ### Windows — get & run
 
@@ -120,6 +154,7 @@ talos scan --profile quick         # scan high-risk folders (Downloads, Temp, �
 talos scan C:\Users\me\Downloads   # scan a specific path
 talos scan C:\path --quarantine    # scan + isolate detected threats
 talos scan C:\path --json          # NDJSON telemetry (see docs/07)
+talos update                       # fetch the latest signatures (abuse.ch + open YARA)
 talos quarantine list              # review the vault
 talos quarantine restore <id>      # restore a false positive
 ```
