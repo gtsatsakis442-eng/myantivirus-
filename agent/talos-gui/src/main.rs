@@ -335,7 +335,7 @@ impl TalosApp {
             )
         };
 
-        // Hero protection-status card.
+        // Hero protection-status card with the primary action inline.
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("●").color(status_col).size(46.0));
@@ -344,23 +344,62 @@ impl TalosApp {
                     ui.label(RichText::new(title).color(TEXT).size(24.0).strong());
                     ui.label(RichText::new(subtitle).color(DIM).size(13.0));
                 });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let label = if self.scanning {
+                        "Scanning…"
+                    } else {
+                        "Quick Scan"
+                    };
+                    let btn = egui::Button::new(
+                        RichText::new(label)
+                            .color(Color32::WHITE)
+                            .size(15.0)
+                            .strong(),
+                    )
+                    .fill(ACCENT)
+                    .min_size(egui::vec2(150.0, 40.0));
+                    if ui.add_enabled(!self.scanning, btn).clicked() {
+                        self.start(engine_glue::quick_scan_paths(), "Quick");
+                    }
+                });
             });
         });
 
-        ui.add_space(10.0);
-        ui.horizontal_wrapped(|ui| {
-            stat(ui, "Signatures", &self.hashes.to_string(), "hash rules");
-            stat(ui, "YARA files", &self.yara.to_string(), "rule sets");
-            stat(ui, "Quarantine", &self.quarantined.to_string(), "isolated");
-            stat(
-                ui,
-                "Last scan",
-                &if self.last_scan_unix == 0 {
-                    "never".to_string()
-                } else {
-                    time_ago(self.last_scan_unix)
-                },
-                "",
+        ui.add_space(12.0);
+
+        // At-a-glance metrics: an even, responsive row that scales with the
+        // window — no fixed-width tiles that wrap into stray boxes. These are
+        // distinct from the Definitions card below (which holds the breakdown).
+        let definitions = (self.hashes + self.yara).to_string();
+        let last_scan = if self.last_scan_unix == 0 {
+            "never".to_string()
+        } else {
+            time_ago(self.last_scan_unix)
+        };
+        let (threats_val, threats_col) = match self.last {
+            Some(d) if d.malicious + d.suspicious > 0 => {
+                ((d.malicious + d.suspicious).to_string(), ACCENT)
+            }
+            Some(_) => ("0".to_string(), GREEN),
+            None => ("—".to_string(), DIM),
+        };
+        let quar_col = if self.quarantined > 0 { AMBER } else { TEXT };
+        ui.columns(4, |c| {
+            stat_tile(
+                &mut c[0],
+                "Definitions",
+                &definitions,
+                TEXT,
+                "signatures & rules",
+            );
+            stat_tile(&mut c[1], "Last scan", &last_scan, TEXT, "most recent");
+            stat_tile(&mut c[2], "Threats", &threats_val, threats_col, "last scan");
+            stat_tile(
+                &mut c[3],
+                "Quarantine",
+                &self.quarantined.to_string(),
+                quar_col,
+                "isolated",
             );
         });
 
@@ -411,19 +450,15 @@ impl TalosApp {
             ui.add_space(4.0);
             ui.label(
                 RichText::new(
-                    "Reloads the local / built-in definition store and re-counts rules. \
-                     Live cloud delta updates are on the roadmap.",
+                    "Fetches openly-licensed feeds (abuse.ch hashes + open YARA rules) into \
+                     your local store and reloads the engine. Signed delta channel is on the roadmap.",
                 )
                 .color(DIM)
                 .size(11.0),
             );
         });
 
-        ui.add_space(12.0);
-        if primary_button(ui, "Run Quick Scan").clicked() {
-            self.start(engine_glue::quick_scan_paths(), "Quick");
-        }
-        ui.add_space(6.0);
+        ui.add_space(10.0);
         ui.label(RichText::new(&self.status).color(DIM).size(12.0));
     }
 
@@ -673,18 +708,27 @@ fn card<R>(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui) -> 
         .inner
 }
 
-fn stat(ui: &mut egui::Ui, title: &str, value: &str, unit: &str) {
+/// A metric tile that fills its column to a uniform size, so a row of them
+/// reads as an aligned grid rather than a scatter of differently-sized boxes.
+fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, value_col: Color32, unit: &str) {
     egui::Frame::none()
         .fill(CARD)
         .rounding(10.0)
         .inner_margin(14.0)
         .show(ui, |ui| {
-            ui.set_width(150.0);
-            ui.label(RichText::new(title).color(DIM).size(12.0));
-            ui.label(RichText::new(value).color(TEXT).size(22.0).strong());
-            if !unit.is_empty() {
-                ui.label(RichText::new(unit).color(DIM).size(11.0));
-            }
+            ui.set_min_width(ui.available_width());
+            ui.set_min_height(58.0);
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(title.to_uppercase())
+                        .color(DIM)
+                        .size(10.5)
+                        .strong(),
+                );
+                ui.add_space(3.0);
+                ui.label(RichText::new(value).color(value_col).size(23.0).strong());
+                ui.label(RichText::new(unit).color(DIM).size(10.5));
+            });
         });
 }
 

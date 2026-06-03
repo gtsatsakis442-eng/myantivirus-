@@ -17,7 +17,7 @@ Talos scans files and flags threats using three layers:
 |---|---|---|
 | **Hash signatures** | exact known-bad files (SHA-256) | malicious |
 | **YARA rules** | known patterns (EICAR, web shells, malicious PowerShell) | malicious |
-| **Static heuristics** | packed/high-entropy PEs, process-injection imports, W^X sections | **suspicious** |
+| **Static heuristics** | packed **code** sections, process-injection imports, W^X sections — needs **≥2 signals**; Authenticode-signed files are trusted | **suspicious** |
 
 It also looks **inside ZIP archives**, and can **quarantine** (isolate) detected
 files and later **restore** them.
@@ -25,6 +25,10 @@ files and later **restore** them.
 - *Malicious* findings can be quarantined (and are, with `--quarantine`).
 - *Suspicious* findings are reported but **never** auto-quarantined (so a
   legitimately packed installer is flagged, not deleted).
+- To keep false positives low, the heuristic layer **trusts code-signed
+  (Authenticode) binaries** — so signed Microsoft/vendor DLLs are not flagged —
+  and only raises *suspicious* when **two or more** independent signals agree.
+  Known-bad files are still caught by the hash and YARA layers regardless.
 
 ---
 
