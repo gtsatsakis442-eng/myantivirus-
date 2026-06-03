@@ -3932,7 +3932,7 @@ dependencies = [
 
 [[package]]
 name = "scanner-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3944,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "scanner-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "goblin",
  "hex",
@@ -4349,7 +4349,7 @@ dependencies = [
 
 [[package]]
 name = "talos-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
