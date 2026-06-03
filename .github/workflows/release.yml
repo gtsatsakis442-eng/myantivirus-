@@ -52,36 +52,65 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-      - name: Publish versioned release (tags)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Read version from Cargo.toml
+        id: ver
+        shell: pwsh
+        run: |
+          $m = Select-String -Path Cargo.toml -Pattern '^\s*version\s*=\s*"([^"]+)"' | Select-Object -First 1
+          $v = $m.Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Talos version: $v"
+
+      - name: Publish versioned release (v<version>)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Talos EPP v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          prerelease: false
           files: |
             dist/talos-gui.exe
             dist/talos.exe
             dist/talos-agent.msi
-          generate_release_notes: true
+          body: |
+            **Talos EPP v${{ steps.ver.outputs.version }}** — Windows build.
+
+            - **`talos-gui.exe`** — the desktop **GUI app** (double-click it).
+            - **`talos.exe`** — the console/CLI agent (`talos selftest`, `talos update`).
+            - **`talos-agent.msi`** — the enterprise installer (GPO / Intune / SCCM).
+
+            **Highlights:** multi-source signature updater (abuse.ch hashes + open
+            YARA + optional ClamAV), reduced heuristic false positives (Authenticode
+            trust + two-signal rule), and a redesigned GUI (Security Advisor,
+            Protection grid, Activity log, real Settings with exclusions). Both exes
+            are self-contained — signatures are embedded.
+
+            > Unsigned build — Windows SmartScreen shows an "Unknown Publisher"
+            > prompt (*More info → Run anyway*) until the EV certificate is applied
+            > (see docs/04-deployment-distribution.md).
 
       - name: Publish rolling "latest" release (main / manual)
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Talos EPP — latest build
+          name: Talos EPP — latest (v${{ steps.ver.outputs.version }})
           prerelease: true
           files: |
             dist/talos-gui.exe
             dist/talos.exe
             dist/talos-agent.msi
           body: |
-            **Rolling pre-release built from `main`.**
+            **Rolling pre-release built from `main` (v${{ steps.ver.outputs.version }}).**
 
             - **`talos-gui.exe`** — the desktop **GUI app** (double-click it).
             - **`talos.exe`** — the console/CLI agent (automation, `talos selftest`).
             - **`talos-agent.msi`** — the enterprise installer (GPO/Intune/SCCM).
 
             Both exes are self-contained (signatures embedded); no extra files
-            needed.
+            needed. For a pinned version, see the **v${{ steps.ver.outputs.version }}**
+            release.
 
             > Not production-signed yet — Windows SmartScreen will show an
             > "Unknown Publisher" prompt (click *More info → Run anyway*) until
