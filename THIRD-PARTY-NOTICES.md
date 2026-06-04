@@ -25,6 +25,15 @@ the sources and their licenses so downstream users can honor the original terms.
   request header.
 - **Project:** https://abuse.ch · https://bazaar.abuse.ch
 
+### abuse.ch — ThreatFox (IOC hashes)
+- **What we use:** IOC **SHA-256** hashes from the CSV export.
+- **Endpoint (default):** `https://threatfox.abuse.ch/export/csv/sha256/recent/`
+- **License:** **CC0 1.0 Universal** (public domain dedication).
+- **Notes:** ThreatFox requires a free abuse.ch **Auth-Key**; provide it via
+  `TALOS_ABUSE_KEY` (sent as the `Auth-Key` header). Disabled in effect until a
+  key is present.
+- **Project:** https://threatfox.abuse.ch
+
 ### Neo23x0 — `signature-base` (YARA rules)
 - **What we use:** a curated subset of `*.yar` rule files (web shells, offensive
   tooling, APT/Cobalt Strike, exploitation, AMSI-tampering, …).

@@ -20,8 +20,13 @@
 //! }
 //! # Ok::<(), scanner_core::ScanError>(())
 //! ```
+//!
+//! Hardening: this crate forbids `unsafe` code — all memory-unsafe operations
+//! live in audited dependencies (`goblin`, `yara-x`), never in our logic.
+#![forbid(unsafe_code)]
 
 pub mod archive;
+pub mod behavior;
 pub mod bootstrap;
 pub mod engine;
 pub mod error;

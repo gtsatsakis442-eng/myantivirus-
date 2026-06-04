@@ -11,6 +11,7 @@ pub struct Engine {
     hashes: HashSignatureDb,
     yara: Option<YaraEngine>,
     heuristics: bool,
+    behavior: bool,
 }
 
 impl Engine {
@@ -19,6 +20,7 @@ impl Engine {
             hashes,
             yara,
             heuristics: true,
+            behavior: true,
         }
     }
 
@@ -28,6 +30,7 @@ impl Engine {
             hashes,
             yara: None,
             heuristics: true,
+            behavior: true,
         }
     }
 
@@ -41,6 +44,11 @@ impl Engine {
     /// Toggle the static heuristic layer in place.
     pub fn set_heuristics(&mut self, on: bool) {
         self.heuristics = on;
+    }
+
+    /// Toggle the static behavioral capability layer (L2.5) in place.
+    pub fn set_behavior(&mut self, on: bool) {
+        self.behavior = on;
     }
 
     pub fn hash_db(&self) -> &HashSignatureDb {
@@ -106,6 +114,10 @@ impl Engine {
             // Static heuristics (L2) run on PE content; no-op for other files.
             if self.heuristics {
                 detections.extend(crate::heuristics::analyze(bytes));
+            }
+            // Static behavioral capability analysis (L2.5); no-op for non-PE.
+            if self.behavior {
+                detections.extend(crate::behavior::analyze(bytes));
             }
         }
 

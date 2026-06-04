@@ -43,6 +43,8 @@ pub struct TalosConfig {
     pub scan_archives: bool,
     /// Run the static PE heuristic layer (packing / injection / W^X).
     pub heuristics: bool,
+    /// Run the static behavioral capability layer (CAPA-style, MITRE-tagged).
+    pub behavior: bool,
     /// Trusted paths to skip (files or folders).
     pub exclusions: Vec<String>,
     /// Dark vs. light appearance.
@@ -59,6 +61,7 @@ impl Default for TalosConfig {
             follow_symlinks: false,
             scan_archives: true,
             heuristics: true,
+            behavior: true,
             exclusions: Vec::new(),
             dark_theme: true,
             schedule: Schedule::Off,

@@ -35,6 +35,9 @@ pub enum DetectionKind {
     YaraRule,
     /// A static heuristic signal (suspicious, not by itself definitive).
     Heuristic,
+    /// A static behavioral capability (CAPA-style import/string inference,
+    /// MITRE ATT&CK-tagged; suspicious, not by itself definitive).
+    Behavior,
 }
 
 /// A single finding against an artifact.
@@ -64,7 +67,7 @@ pub enum Disposition {
 
 impl Disposition {
     /// Classify a set of detections: a hash/YARA hit is `Malicious`;
-    /// heuristic-only findings are `Suspicious`; none is `Clean`.
+    /// heuristic/behavioral-only findings are `Suspicious`; none is `Clean`.
     pub fn classify(detections: &[Detection]) -> Disposition {
         if detections.is_empty() {
             return Disposition::Clean;

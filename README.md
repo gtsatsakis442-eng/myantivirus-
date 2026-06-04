@@ -77,14 +77,19 @@ This is a **defensive security product**. Everything here is intended for the
 ## Phase 1 — the app (`talos-gui.exe` + `talos.exe`)
 
 Ships as a **desktop GUI** (`talos-gui.exe`, a dark dashboard-style console) and
-a headless **CLI agent** (`talos.exe`) — both over the same engine. Three detection layers
-today: exact **hash signatures**, **YARA** rules, and **static PE heuristics**
-(entropy/packing, process-injection imports, W^X sections — reported as
-*suspicious*, never auto-actioned). It also scans **inside ZIP archives**
-(zip-bomb-guarded). Detections can be **quarantined** (isolated) and restored.
-Directory scans run **in parallel across all CPU cores** (tune with `--threads`)
-and report throughput. The ONNX static-ML layer is intentionally deferred until
-the file-processing pipeline is hardened (see `ml/`).
+a headless **CLI agent** (`talos.exe`) — both over the same engine. Four detection
+layers today: exact **hash signatures**, **YARA** rules, **static PE heuristics**
+(entropy/packing, process-injection imports, W^X sections), and **behavioral
+capability analysis** — a CAPA-style layer that infers what a PE *would do* from
+its imports & strings and tags it with **MITRE ATT&CK** techniques (process
+injection, credential access, ransomware, AMSI/ETW tampering, persistence,
+C2, …). Heuristic and behavioral findings are reported as *suspicious* (never
+auto-actioned) and require corroboration, so signed Microsoft/vendor binaries
+aren't flagged. It also scans **inside ZIP archives** (zip-bomb-guarded).
+Detections can be **quarantined** (isolated) and restored. Directory scans run
+**in parallel across all CPU cores** (tune with `--threads`) and report
+throughput. Runtime behavioral monitoring and the ONNX static-ML layer are
+deferred to the Phase-2 kernel sensor (see `ml/`, docs/01).
 
 **Live signature updates.** A baseline ships **embedded** in the binaries, and
 `talos update` (CLI), the GUI **Update** button, or interactive menu **[5]**
@@ -94,8 +99,12 @@ store the engine reloads on the spot:
 | Feed | Content | License | Default |
 |---|---|---|---|
 | **abuse.ch MalwareBazaar** | recent malware SHA-256 hashes | CC0 | on |
+| **abuse.ch ThreatFox** | IOC SHA-256 hashes | CC0 | on (needs free `TALOS_ABUSE_KEY`) |
 | **Open YARA** (Neo23x0/signature-base) | curated rules: web shells, offensive tooling, APT/Cobalt Strike, exploits, AMSI tampering | DRL 1.1 | on |
 | **ClamAV** | `.hsb` SHA-256 signatures | GPL-2.0 | opt-in (`--clamav-url`) |
+
+For a much larger YARA corpus, point `TALOS_YARA_URLS` at **YARA Forge**,
+**ReversingLabs**, or **YARA-Rules**. Downloads are HTTPS-only and size-capped.
 
 Only SHA-256 hash entries are ingested; incompatible YARA rules are skipped
 gracefully. Sources, licenses, and attribution:

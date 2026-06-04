@@ -131,7 +131,7 @@ fn findings_for(sig: &Signals) -> Vec<Detection> {
 /// True if the PE has an embedded Authenticode certificate. We check both the
 /// parsed certificate table and the raw certificate **data directory** size, so
 /// a present-but-truncated signature blob still counts as "signed".
-fn is_authenticode_signed(pe: &PE) -> bool {
+pub(crate) fn is_authenticode_signed(pe: &PE) -> bool {
     if !pe.certificates.is_empty() {
         return true;
     }
