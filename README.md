@@ -1,5 +1,11 @@
 # Talos EPP — Enterprise Endpoint Protection Platform
 
+> Named for **Talos**, the giant bronze automaton of Greek myth that guarded
+> Crete — the app's logo (a bronze Talos warrior with a Cretan-labyrinth shield)
+> appears in the GUI (dashboard, sidebar, About) and is embedded as the `.exe`
+> icon. The source artwork is `assets/talos-logo.webp`; the GUI textures and the
+> multi-size icon are derived from it by `tools/process_logo.py`.
+
 > **Status:** Phase 1 shipping — working GUI + CLI app (multi-layer on-demand
 > scanner with live signature updates). Phases 2+ (kernel sensor, ML, cloud)
 > remain design/roadmap.
@@ -130,8 +136,8 @@ binaries** (so signed Microsoft/vendor DLLs aren't flagged) and only raises
 The Windows binaries are proper apps: each carries the **Talos icon** and
 **version/product metadata** (shown in Explorer, the taskbar, and
 Properties → Details), embedded at build time from `assets/talos.ico`
-(regenerate with `tools/make_icon.py`). The GUI uses the same artwork as its
-window/taskbar icon.
+(derived from the logo by `tools/process_logo.py`). The GUI uses the same
+artwork as its window/taskbar icon.
 
 📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
 **updating signatures**, quarantine, troubleshooting.
