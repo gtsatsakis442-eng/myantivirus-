@@ -188,7 +188,10 @@ terms are in [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 | Variable | Effect |
 |---|---|
 | `TALOS_ABUSE_KEY` | abuse.ch Auth-Key (MalwareBazaar/ThreatFox feeds **and** `talos lookup`) |
-| `TALOS_VT_KEY` | VirusTotal API key — preferred provider for `talos lookup` |
+| `TALOS_VT_KEY` | VirusTotal API key (`talos lookup`) |
+| `TALOS_MALSHARE_KEY` | MalShare API key (`talos lookup`) |
+| `TALOS_OTX_KEY` | AlienVault OTX API key (`talos lookup`) |
+| `TALOS_HYBRID_KEY` | Hybrid Analysis (Falcon Sandbox) API key (`talos lookup`) |
 | `TALOS_YARA_URLS` | comma-separated list of YARA URLs to fetch instead of the defaults |
 | `TALOS_CLAMAV_URL` | a ClamAV `.hsb` SHA-256 list URL (same as `--clamav-url`) |
 
@@ -202,14 +205,17 @@ terms are in [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 ## 6.5. Threat-intel lookups & real-time monitoring
 
 **Threat intelligence** (`talos lookup`, or the GUI **Threat Intel** view) checks
-a file's **SHA-256** against a free online malware database and reports what's
-known (family, tags, first-seen, AV-detection ratio). **Only the hash is sent —
-file contents never leave the machine.** Set one free key (VirusTotal is
-preferred if both are present):
+a file's **SHA-256** against free online malware databases and reports what's
+known (family, tags, first-seen, AV-detection ratio, sandbox verdict, OTX
+pulses). **Only the hash is sent — file contents never leave the machine.** It
+queries **every provider you have a free key for** and aggregates the results:
 
 ```bash
-export TALOS_VT_KEY=...      # virustotal.com (free account)
-export TALOS_ABUSE_KEY=...   # auth.abuse.ch (free account) — MalwareBazaar
+export TALOS_VT_KEY=...        # virustotal.com
+export TALOS_ABUSE_KEY=...     # auth.abuse.ch — MalwareBazaar
+export TALOS_MALSHARE_KEY=...  # malshare.com
+export TALOS_OTX_KEY=...       # otx.alienvault.com
+export TALOS_HYBRID_KEY=...    # hybrid-analysis.com (Falcon Sandbox)
 talos lookup C:\Users\me\Downloads\suspicious.exe   # hashes the file, then looks up
 talos lookup 275a021b…fd0f                           # or pass a SHA-256 directly
 ```

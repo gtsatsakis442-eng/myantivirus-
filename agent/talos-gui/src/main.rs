@@ -139,7 +139,7 @@ struct TalosApp {
     intel_source: String,
     intel_lines: Vec<String>,
     intel_busy: bool,
-    intel_rx: Option<Receiver<Result<scanner_core::IntelReport, String>>>,
+    intel_rx: Option<Receiver<Result<Vec<scanner_core::IntelReport>, String>>>,
 }
 
 impl TalosApp {
@@ -421,9 +421,20 @@ impl TalosApp {
             self.intel_busy = false;
             self.intel_rx = None;
             match result {
-                Ok(report) => {
-                    self.intel_source = report.source;
-                    self.intel_lines = report.lines;
+                Ok(reports) => {
+                    let known = reports.iter().filter(|r| r.found).count();
+                    self.intel_source =
+                        format!("{} provider(s) · {known} with a record", reports.len());
+                    let mut lines = Vec::new();
+                    for r in reports {
+                        lines.push(format!(
+                            "── {} · {} ──",
+                            r.source,
+                            if r.found { "KNOWN" } else { "no record" }
+                        ));
+                        lines.extend(r.lines);
+                    }
+                    self.intel_lines = lines;
                 }
                 Err(e) => {
                     self.intel_source = "Lookup failed".to_string();
@@ -1092,7 +1103,9 @@ impl TalosApp {
             ui.add_space(4.0);
             ui.label(
                 RichText::new(
-                    "Set TALOS_VT_KEY (VirusTotal) or TALOS_ABUSE_KEY (abuse.ch, free) to enable.",
+                    "Queries every provider you have a key for: TALOS_VT_KEY (VirusTotal), \
+                     TALOS_ABUSE_KEY (MalwareBazaar), TALOS_MALSHARE_KEY, TALOS_OTX_KEY \
+                     (AlienVault), TALOS_HYBRID_KEY (Hybrid Analysis).",
                 )
                 .color(DIM)
                 .size(11.0),

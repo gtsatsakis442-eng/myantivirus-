@@ -120,7 +120,7 @@ leading suites (Bitdefender, Malwarebytes, ESET, Kaspersky) approachable:
 | **Scan** | Quick / Full / Custom with live progress and per-detection results |
 | **Quarantine** | isolate, restore, delete |
 | **Activity** | a persisted log of scans, updates, real-time hits and quarantine actions |
-| **Threat Intel** | look up a SHA-256 against a free online malware DB (VirusTotal / MalwareBazaar) — family, tags, AV-detection ratio; only the hash is sent |
+| **Threat Intel** | look up a SHA-256 across **5 free providers** (VirusTotal, abuse.ch MalwareBazaar, MalShare, AlienVault OTX, Hybrid Analysis) and aggregate the results — family, tags, AV-detection ratio, sandbox verdict, OTX pulses; only the hash is sent |
 | **Settings** | real engine controls — file-size cap, **exclusions** (trusted paths the scanner skips), archive/heuristics/**behavior** toggles, scheduled-scan preference — saved to `config.json` and applied to the next scan |
 
 To keep false positives low, the heuristic layer **trusts Authenticode-signed
