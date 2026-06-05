@@ -116,11 +116,12 @@ leading suites (Bitdefender, Malwarebytes, ESET, Kaspersky) approachable:
 | Area | What it gives you |
 |---|---|
 | **Dashboard** | protection-status hero + a **Security Advisor** that recommends contextual actions (run a scan, update, review quarantine) computed from real state |
-| **Protection** | a module grid showing **Active** layers (antimalware, YARA, heuristics, archive inspection, quarantine, updates) with on/off toggles, and **Roadmap** modules (real-time, web, firewall, ransomware) honestly labeled — not faked "on" |
+| **Protection** | module grid with on/off toggles, including a **Real-time Protection** switch that starts *user-mode on-access monitoring* (auto-scans new/changed files). Truly kernel-level modules (pre-execution blocking, web, firewall, ransomware rollback) stay **Roadmap** — labeled, not faked |
 | **Scan** | Quick / Full / Custom with live progress and per-detection results |
 | **Quarantine** | isolate, restore, delete |
-| **Activity** | a persisted log of scans, updates and quarantine actions |
-| **Settings** | real engine controls — file-size cap, **exclusions** (trusted paths the scanner skips), archive/heuristics/symlink toggles, scheduled-scan preference — saved to `config.json` and applied to the next scan |
+| **Activity** | a persisted log of scans, updates, real-time hits and quarantine actions |
+| **Threat Intel** | look up a SHA-256 against a free online malware DB (VirusTotal / MalwareBazaar) — family, tags, AV-detection ratio; only the hash is sent |
+| **Settings** | real engine controls — file-size cap, **exclusions** (trusted paths the scanner skips), archive/heuristics/**behavior** toggles, scheduled-scan preference — saved to `config.json` and applied to the next scan |
 
 To keep false positives low, the heuristic layer **trusts Authenticode-signed
 binaries** (so signed Microsoft/vendor DLLs aren't flagged) and only raises
@@ -164,6 +165,8 @@ talos scan C:\Users\me\Downloads   # scan a specific path
 talos scan C:\path --quarantine    # scan + isolate detected threats
 talos scan C:\path --json          # NDJSON telemetry (see docs/07)
 talos update                       # fetch the latest signatures (abuse.ch + open YARA)
+talos lookup <sha256|file>         # threat-intel lookup (VirusTotal / MalwareBazaar)
+talos watch [folders...]           # real-time on-access monitoring (user-mode)
 talos quarantine list              # review the vault
 talos quarantine restore <id>      # restore a false positive
 ```

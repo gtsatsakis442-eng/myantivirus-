@@ -85,7 +85,8 @@ open-source licenses (predominantly **MIT** and **Apache-2.0**). Notable
 components:
 
 - **`yara-x`** — VirusTotal's pure-Rust YARA engine (the YARA scanning layer).
-- **`goblin`** — PE/object parsing for static heuristics.
+- **`goblin`** — PE/object parsing for static heuristics & behavioral analysis.
+- **`notify`** — cross-platform filesystem watching (real-time on-access monitor).
 - **`eframe` / `egui`** — the GUI toolkit (`talos-gui`).
 - **`rayon`**, **`walkdir`**, **`zip`**, **`sha2` / `sha1` / `md-5`**,
   **`clap`**, **`serde` / `serde_json`**, **`tempfile`**.
@@ -96,6 +97,20 @@ For the authoritative, version-pinned license list, run
 `Cargo.lock`. Each crate's license is declared in its own metadata.
 
 ---
+
+## 4. Threat-intelligence enrichment APIs (optional)
+
+`talos lookup` / the GUI **Threat Intel** view query a free online malware
+database **with a SHA-256 hash only** (no file content is uploaded). These are
+external services used at the operator's request with the operator's own free
+API key; Talos neither bundles nor redistributes their data:
+
+- **VirusTotal** (`x-apikey`, `TALOS_VT_KEY`) — https://www.virustotal.com —
+  subject to the VirusTotal Terms of Service / API usage policy.
+- **abuse.ch MalwareBazaar** (`Auth-Key`, `TALOS_ABUSE_KEY`) — CC0 data —
+  https://bazaar.abuse.ch/api/
+
+Respect each provider's rate limits and terms when using these lookups.
 
 *This product is for authorized, defensive use only. See the repository README
 and `docs/05-compliance-privacy.md` for scope, ethics, and authorization.*

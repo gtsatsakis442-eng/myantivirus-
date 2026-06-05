@@ -76,6 +76,7 @@ enum View {
     Scan,
     Quarantine,
     Activity,
+    Intel,
     Settings,
     About,
 }
@@ -129,6 +130,16 @@ struct TalosApp {
 
     activity: Vec<history::Event>,
     activity_loaded: bool,
+
+    realtime: Option<engine_glue::RealtimeHandle>,
+    realtime_paths: usize,
+    realtime_hits: u64,
+
+    intel_query: String,
+    intel_source: String,
+    intel_lines: Vec<String>,
+    intel_busy: bool,
+    intel_rx: Option<Receiver<Result<scanner_core::IntelReport, String>>>,
 }
 
 impl TalosApp {
@@ -161,7 +172,43 @@ impl TalosApp {
             q_loaded: false,
             activity: Vec::new(),
             activity_loaded: false,
+            realtime: None,
+            realtime_paths: 0,
+            realtime_hits: 0,
+            intel_query: String::new(),
+            intel_source: String::new(),
+            intel_lines: Vec::new(),
+            intel_busy: false,
+            intel_rx: None,
         }
+    }
+
+    fn start_realtime(&mut self) {
+        if self.realtime.is_some() {
+            return;
+        }
+        self.realtime_hits = 0;
+        self.realtime = Some(engine_glue::start_realtime(engine_glue::quick_scan_paths()));
+        self.status = "Real-time monitoring starting…".to_string();
+    }
+
+    fn stop_realtime(&mut self) {
+        if let Some(h) = self.realtime.take() {
+            h.stop();
+        }
+        self.realtime_paths = 0;
+        self.status = "Real-time monitoring stopped.".to_string();
+    }
+
+    fn do_intel(&mut self) {
+        let q = self.intel_query.trim().to_string();
+        if q.is_empty() || self.intel_busy {
+            return;
+        }
+        self.intel_busy = true;
+        self.intel_lines.clear();
+        self.intel_source.clear();
+        self.intel_rx = Some(engine_glue::start_intel(q));
     }
 
     fn refresh_inventory(&mut self) {
@@ -340,7 +387,52 @@ impl TalosApp {
             }
         }
 
-        if self.scanning || self.updating {
+        // Drain real-time monitor events (collect first to avoid borrow issues).
+        let mut rt_events = Vec::new();
+        if let Some(handle) = &self.realtime {
+            while let Ok(msg) = handle.rx.try_recv() {
+                rt_events.push(msg);
+            }
+        }
+        for msg in rt_events {
+            match msg {
+                engine_glue::RealtimeMsg::Started(n) => {
+                    self.realtime_paths = n;
+                    self.status = format!("Real-time monitoring active — watching {n} folder(s).");
+                }
+                engine_glue::RealtimeMsg::Detection(r) => {
+                    self.realtime_hits += 1;
+                    self.status = format!("Real-time: detection in {}", r.path);
+                    if self.threats.len() < 5000 {
+                        self.threats.push(*r);
+                    }
+                    self.activity_loaded = false;
+                }
+                engine_glue::RealtimeMsg::Error(e) => {
+                    self.status = format!("Real-time error: {e}");
+                    self.realtime = None;
+                }
+            }
+        }
+
+        // Drain a threat-intel lookup, if running.
+        let intel_result = self.intel_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(result) = intel_result {
+            self.intel_busy = false;
+            self.intel_rx = None;
+            match result {
+                Ok(report) => {
+                    self.intel_source = report.source;
+                    self.intel_lines = report.lines;
+                }
+                Err(e) => {
+                    self.intel_source = "Lookup failed".to_string();
+                    self.intel_lines = vec![e];
+                }
+            }
+        }
+
+        if self.scanning || self.updating || self.realtime.is_some() || self.intel_busy {
             ctx.request_repaint();
         }
     }
@@ -367,6 +459,7 @@ impl eframe::App for TalosApp {
                         View::Scan => self.scan_view(ui),
                         View::Quarantine => self.quarantine_view(ui),
                         View::Activity => self.activity_view(ui),
+                        View::Intel => self.intel_view(ui),
                         View::Settings => self.settings_view(ui),
                         View::About => self.about(ui),
                     });
@@ -389,6 +482,7 @@ impl TalosApp {
         nav_section(ui, "MANAGE");
         nav(ui, &mut self.view, View::Quarantine, "Quarantine");
         nav(ui, &mut self.view, View::Activity, "Activity");
+        nav(ui, &mut self.view, View::Intel, "Threat Intel");
         ui.add_space(10.0);
         nav_section(ui, "SYSTEM");
         nav(ui, &mut self.view, View::Settings, "Settings");
@@ -425,11 +519,12 @@ impl TalosApp {
                 "Review the Scan view and quarantine the findings.",
             )
         } else {
-            (
-                GREEN,
-                "You're protected",
-                "On-demand engine ready · real-time sensor: Phase 2",
-            )
+            let sub = if self.realtime.is_some() {
+                "Real-time monitoring active · on-demand engine ready"
+            } else {
+                "On-demand engine ready · enable Real-time in Protection"
+            };
+            (GREEN, "You're protected", sub)
         };
 
         // Hero protection-status card with the primary action inline.
@@ -609,6 +704,27 @@ impl TalosApp {
         ui.add_space(10.0);
 
         nav_section(ui, "ACTIVE");
+
+        // Real-time on-access monitoring (user-mode) — actually starts/stops a
+        // folder watcher; not the kernel minifilter (that's Phase 2).
+        let mut rt_on = self.realtime.is_some();
+        let rt_desc = if self.realtime.is_some() {
+            format!(
+                "On-access watch ACTIVE — {} folder(s), {} hit(s). Kernel minifilter = Phase 2.",
+                self.realtime_paths, self.realtime_hits
+            )
+        } else {
+            "Auto-scan new/changed files in Downloads, Temp, … (kernel minifilter = Phase 2)."
+                .to_string()
+        };
+        if module_toggle(ui, "Real-time Protection", &rt_desc, &mut rt_on) {
+            if rt_on {
+                self.start_realtime();
+            } else {
+                self.stop_realtime();
+            }
+        }
+
         module_card(
             ui,
             "Antimalware Engine",
@@ -671,8 +787,8 @@ impl TalosApp {
         nav_section(ui, "ROADMAP · PHASE 2 (KERNEL SENSOR)");
         for (name, desc) in [
             (
-                "Real-time Protection",
-                "On-access scanning via a file-system minifilter.",
+                "Pre-execution Blocking",
+                "Kernel minifilter that blocks malicious file I/O before it runs.",
             ),
             (
                 "Web Protection",
@@ -937,6 +1053,68 @@ impl TalosApp {
             });
     }
 
+    fn intel_view(&mut self, ui: &mut egui::Ui) {
+        heading(ui, "Threat Intelligence");
+        ui.label(
+            RichText::new(
+                "Look up a file's SHA-256 against a free online malware database. Only the \
+                 hash is sent — never file contents.",
+            )
+            .color(DIM)
+            .size(12.0),
+        );
+        ui.add_space(10.0);
+
+        card(ui, CARD, |ui| {
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.intel_query)
+                        .desired_width(520.0)
+                        .hint_text("SHA-256 hash (64 hex characters)"),
+                );
+                let label = if self.intel_busy {
+                    "Looking up…"
+                } else {
+                    "Look up"
+                };
+                if ui
+                    .add_enabled(
+                        !self.intel_busy,
+                        egui::Button::new(RichText::new(label).color(Color32::WHITE).strong())
+                            .fill(ACCENT)
+                            .min_size(egui::vec2(120.0, 32.0)),
+                    )
+                    .clicked()
+                {
+                    self.do_intel();
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(
+                    "Set TALOS_VT_KEY (VirusTotal) or TALOS_ABUSE_KEY (abuse.ch, free) to enable.",
+                )
+                .color(DIM)
+                .size(11.0),
+            );
+        });
+
+        if !self.intel_lines.is_empty() {
+            ui.add_space(10.0);
+            card(ui, CARD, |ui| {
+                ui.label(
+                    RichText::new(format!("Source: {}", self.intel_source))
+                        .color(TEXT)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                for line in &self.intel_lines {
+                    ui.label(RichText::new(line).color(DIM).size(12.0));
+                }
+            });
+        }
+    }
+
     fn settings_view(&mut self, ui: &mut egui::Ui) {
         heading(ui, "Settings");
         let mut dirty = false;
@@ -1105,6 +1283,13 @@ impl TalosApp {
                     .color(DIM),
             );
             ui.label(RichText::new("• ZIP archive inspection (zip-bomb-guarded)").color(DIM));
+            ui.label(
+                RichText::new("• Real-time on-access monitoring (user-mode folder watch)")
+                    .color(DIM),
+            );
+            ui.label(
+                RichText::new("• Threat-intel hash lookup (MalwareBazaar / VirusTotal)").color(DIM),
+            );
             ui.add_space(8.0);
             ui.label(
                 RichText::new(

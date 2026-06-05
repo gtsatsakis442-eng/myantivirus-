@@ -3,8 +3,11 @@
 //! the GUI is a standalone, self-contained app.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use scanner_core::{
     Disposition, Engine, Quarantine, ScanOptions, ScanReport, ScanSummary, Scanner,
@@ -230,6 +233,89 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
             ms,
             bytes: summary.bytes_scanned,
         });
+    });
+    rx
+}
+
+/// Events streamed from the real-time monitor thread.
+pub enum RealtimeMsg {
+    Started(usize),
+    Detection(Box<ScanReport>),
+    Error(String),
+}
+
+/// Handle to a running real-time monitor. Call [`RealtimeHandle::stop`] (or drop
+/// it) to end monitoring.
+pub struct RealtimeHandle {
+    pub rx: Receiver<RealtimeMsg>,
+    stop: Arc<AtomicBool>,
+}
+
+impl RealtimeHandle {
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Drop for RealtimeHandle {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Start user-mode on-access monitoring of `paths`: a background thread watches
+/// for new/changed files and auto-scans each with the configured engine,
+/// streaming any detections to the UI.
+pub fn start_realtime(paths: Vec<PathBuf>) -> RealtimeHandle {
+    let (tx, rx) = mpsc::channel::<RealtimeMsg>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_thread = stop.clone();
+    thread::spawn(move || {
+        let cfg = TalosConfig::load();
+        let (mut engine, _, _) = match load_engine() {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = tx.send(RealtimeMsg::Error(e));
+                return;
+            }
+        };
+        engine.set_heuristics(cfg.heuristics);
+        engine.set_behavior(cfg.behavior);
+        let scanner = Scanner::with_options(&engine, scan_options(&cfg));
+        let watch = match scanner_core::realtime::watch(&paths) {
+            Ok(w) => w,
+            Err(e) => {
+                let _ = tx.send(RealtimeMsg::Error(e.to_string()));
+                return;
+            }
+        };
+        let _ = tx.send(RealtimeMsg::Started(paths.len()));
+        while !stop_thread.load(Ordering::Relaxed) {
+            match watch.rx.recv_timeout(Duration::from_millis(300)) {
+                Ok(path) => {
+                    let report = scanner.scan_file(&path);
+                    if report.is_malicious() || report.is_suspicious() {
+                        history::record(
+                            "realtime",
+                            format!("Real-time detection: {}", report.path),
+                        );
+                        let _ = tx.send(RealtimeMsg::Detection(Box::new(report)));
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+    RealtimeHandle { rx, stop }
+}
+
+/// Spawn a background threat-intel lookup of `sha256`.
+pub fn start_intel(sha256: String) -> Receiver<Result<scanner_core::IntelReport, String>> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let r = scanner_core::lookup_hash(&sha256).map_err(|e| e.to_string());
+        let _ = tx.send(r);
     });
     rx
 }

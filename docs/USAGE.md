@@ -67,15 +67,18 @@ Double-click **`talos-gui.exe`** to open the security console:
 - **Dashboard** — a protection-status hero plus a **Security Advisor** that
   suggests one-click actions (run a scan, update signatures, review quarantine)
   based on your real state.
-- **Protection** — a module grid: **Active** layers (antimalware, YARA,
-  heuristics, archive inspection, quarantine, updates) with on/off toggles, and
-  **Roadmap** modules (real-time, web, firewall, ransomware) clearly labeled.
+- **Protection** — a module grid with on/off toggles, including a **Real-time
+  Protection** switch that starts *user-mode on-access monitoring* (auto-scans
+  files as they appear in Downloads, Temp, …). Kernel-level modules
+  (pre-execution blocking, web, firewall, ransomware rollback) are **Roadmap**.
 - **Scan** — Quick / Full / Custom with live progress and per-detection results.
 - **Quarantine** — isolate / restore / delete.
-- **Activity** — a persisted log of scans, updates and quarantine actions.
+- **Activity** — a persisted log of scans, updates, real-time hits, quarantine.
+- **Threat Intel** — paste a SHA-256 to look it up against a free online malware
+  database (VirusTotal / MalwareBazaar). Only the hash is sent, never the file.
 - **Settings** — *real* engine controls: file-size cap, **exclusions** (trusted
-  files/folders the scanner skips), archive / heuristics / symlink toggles, and a
-  scheduled-scan preference. Saved to `config.json` and applied to the next scan.
+  files/folders the scanner skips), archive / heuristics / **behavior** / symlink
+  toggles, scheduled-scan preference. Saved to `config.json`, applied next scan.
 
 ### Interactive console app
 Run with **no arguments** (or double-click `talos.exe`):
@@ -94,7 +97,10 @@ talos scan /path/to/dir             # scan a specific path
 talos scan /path --quarantine       # scan and isolate threats
 talos scan /path --json             # NDJSON output (one report/line)
 talos scan /path --show-clean       # also list clean files
+talos scan /path --no-behavior      # skip the behavioral capability layer
 talos update                        # fetch the latest signatures (see §6)
+talos lookup <sha256|file>          # threat-intel lookup (free API; see §9)
+talos watch [folders...]            # real-time on-access monitoring (user-mode)
 ```
 
 ### Quarantine management
@@ -181,7 +187,8 @@ terms are in [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 
 | Variable | Effect |
 |---|---|
-| `TALOS_ABUSE_KEY` | abuse.ch Auth-Key (sent as the `Auth-Key` header) for endpoints that require one |
+| `TALOS_ABUSE_KEY` | abuse.ch Auth-Key (MalwareBazaar/ThreatFox feeds **and** `talos lookup`) |
+| `TALOS_VT_KEY` | VirusTotal API key — preferred provider for `talos lookup` |
 | `TALOS_YARA_URLS` | comma-separated list of YARA URLs to fetch instead of the defaults |
 | `TALOS_CLAMAV_URL` | a ClamAV `.hsb` SHA-256 list URL (same as `--clamav-url`) |
 
@@ -189,6 +196,34 @@ terms are in [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
 > channel (48h baseline + emergency push) described in
 > [docs/03](03-secure-updates.md). `talos update` is the Phase-1 fetcher that
 > proves the multi-source ingestion end-to-end.
+
+---
+
+## 6.5. Threat-intel lookups & real-time monitoring
+
+**Threat intelligence** (`talos lookup`, or the GUI **Threat Intel** view) checks
+a file's **SHA-256** against a free online malware database and reports what's
+known (family, tags, first-seen, AV-detection ratio). **Only the hash is sent —
+file contents never leave the machine.** Set one free key (VirusTotal is
+preferred if both are present):
+
+```bash
+export TALOS_VT_KEY=...      # virustotal.com (free account)
+export TALOS_ABUSE_KEY=...   # auth.abuse.ch (free account) — MalwareBazaar
+talos lookup C:\Users\me\Downloads\suspicious.exe   # hashes the file, then looks up
+talos lookup 275a021b…fd0f                           # or pass a SHA-256 directly
+```
+
+**Real-time protection** (`talos watch`, or the GUI **Protection → Real-time**
+toggle) watches high-risk folders and **auto-scans files as they are created or
+modified**. This is *user-mode on-access* monitoring — a real first step toward
+the roadmap's real-time module. True *pre-execution blocking* needs a kernel
+file-system minifilter and remains Phase 2 (see [docs/01](01-core-architecture.md)).
+
+```bash
+talos watch                       # watch the Quick-Scan high-risk folders
+talos watch C:\Users\me\Downloads # watch specific folders (Ctrl-C to stop)
+```
 
 ---
 
