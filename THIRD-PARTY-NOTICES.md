@@ -34,6 +34,13 @@ the sources and their licenses so downstream users can honor the original terms.
   key is present.
 - **Project:** https://threatfox.abuse.ch
 
+### abuse.ch — Feodo Tracker (C2 IP blocklist)
+- **What we use:** botnet **command-and-control IP** addresses, applied as
+  OS-firewall drop rules by `talos firewall sync`.
+- **Endpoint (default):** `https://feodotracker.abuse.ch/downloads/ipblocklist.txt`
+- **License:** **CC0 1.0 Universal** (public domain dedication).
+- **Project:** https://feodotracker.abuse.ch
+
 ### Neo23x0 — `signature-base` (YARA rules)
 - **What we use:** a curated subset of `*.yar` rule files (web shells, offensive
   tooling, APT/Cobalt Strike, exploitation, AMSI-tampering, …).

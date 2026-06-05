@@ -423,6 +423,12 @@ impl TalosApp {
                     }
                     self.activity_loaded = false;
                 }
+                engine_glue::RealtimeMsg::Ransomware(path) => {
+                    self.realtime_hits += 1;
+                    self.status =
+                        format!("⚠ RANSOMWARE suspected — canary encrypted/deleted: {path}");
+                    self.activity_loaded = false;
+                }
                 engine_glue::RealtimeMsg::Error(e) => {
                     self.status = format!("Real-time error: {e}");
                     self.realtime = None;
@@ -849,22 +855,40 @@ impl TalosApp {
             "abuse.ch malware hashes + open YARA feeds, on demand.",
             ModuleStatus::Active,
         );
+        module_card(
+            ui,
+            "Ransomware Guard",
+            "Canary decoys detect mass-encryption in real time (active with Real-time).",
+            ModuleStatus::Active,
+        );
+        module_card(
+            ui,
+            "Pre-execution Blocking",
+            "Blocks malicious open/exec on Linux via fanotify (`talos watch --enforce`). \
+             Windows kernel minifilter = Phase 2.",
+            ModuleStatus::Active,
+        );
+        module_card(
+            ui,
+            "Firewall (C2 blocking)",
+            "Drops known C2 IPs via the OS firewall, netsh/iptables (`talos firewall sync`).",
+            ModuleStatus::Active,
+        );
 
         ui.add_space(12.0);
         nav_section(ui, "ROADMAP · PHASE 2 (KERNEL SENSOR)");
         for (name, desc) in [
             (
-                "Pre-execution Blocking",
-                "Kernel minifilter that blocks malicious file I/O before it runs.",
+                "Pre-execution Blocking (Windows)",
+                "Kernel file-system minifilter + AMSI to block before run.",
             ),
             (
                 "Web Protection",
                 "Block malicious URLs and phishing in the browser.",
             ),
-            ("Firewall", "Application-aware network filtering (WFP)."),
             (
-                "Ransomware Remediation",
-                "Behavioral rollback of unauthorized encryption.",
+                "Ransomware Rollback",
+                "Kernel I/O filter + Volume Shadow Copy to restore encrypted files.",
             ),
             (
                 "Banking & Payment",

@@ -104,6 +104,9 @@ talos watch [folders...]            # real-time: scan + auto-quarantine on acces
 talos watch --enforce               # real-time BLOCKING via fanotify (Linux, root)
 talos scan /path --json > scan.log  # export a scan log, then …
 talos ingest scan.log               # … grow the signature DB from it (see §10)
+talos guard [folders...]            # ransomware guard: canary decoys + alerts
+sudo talos firewall sync            # drop known C2 IPs via the OS firewall
+talos firewall block <ip> / flush   # block one IP / remove Talos rules
 ```
 
 ### Quarantine management
@@ -294,3 +297,33 @@ Confirmed-malicious hashes are vetted and added to `signatures/hashes/talos.hash
 in the repo, then published in the next release. (A hash signature is an
 exact-match fingerprint and permanent, so only *confirmed* malware is added —
 generalising detections are written as YARA rules instead.)
+
+---
+
+## 11. Ransomware guard & firewall (user-mode)
+
+These are the **user-mode** forms of two roadmap modules — real and useful, but
+not the kernel versions (a kernel I/O filter + Volume Shadow Copy rollback, and
+a WFP/Netfilter packet filter, remain Phase 2).
+
+**Ransomware guard** plants **canary decoy files** in protected folders and
+raises the alarm the instant one is **encrypted or deleted** — a strong
+mass-encryption signal. It runs automatically while **Real-time Protection** is
+on (GUI), or standalone:
+
+```bash
+talos guard                       # protect the Quick-Scan folders (Ctrl-C to stop)
+talos guard C:\Users\me\Documents # protect specific folders
+```
+
+**Firewall** drops traffic to known **botnet C2 IPs** by adding rules to the
+**OS firewall** (`netsh advfirewall` on Windows, `iptables` on Linux) — Talos
+orchestrates the platform firewall rather than shipping its own packet filter.
+The blocklist is the free **abuse.ch Feodo Tracker** C2 IP list. Needs
+Administrator / root:
+
+```bash
+sudo talos firewall sync          # fetch Feodo Tracker C2 IPs → OS firewall drop rules
+talos firewall block 185.0.0.1    # block one IPv4 address
+talos firewall flush              # remove all Talos-created rules
+```

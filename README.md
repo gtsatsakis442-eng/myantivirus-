@@ -191,6 +191,8 @@ talos watch [folders...]           # real-time: scan + auto-quarantine on access
 talos watch --enforce              # real-time BLOCKING via fanotify (Linux, root)
 talos scan C:\path --json > s.log  # export a scan log …
 talos ingest s.log                 # … then grow the signature DB from it
+talos guard [folders...]           # ransomware guard: canary decoys + alerts
+talos firewall sync                # drop known C2 IPs via the OS firewall (admin)
 talos quarantine list              # review the vault
 talos quarantine restore <id>      # restore a false positive
 ```

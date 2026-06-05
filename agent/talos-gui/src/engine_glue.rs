@@ -245,6 +245,8 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
 pub enum RealtimeMsg {
     Started(usize),
     Detection(Box<ScanReport>),
+    /// A ransomware canary was encrypted/deleted — mass-encryption suspected.
+    Ransomware(String),
     Error(String),
 }
 
@@ -293,10 +295,32 @@ pub fn start_realtime(paths: Vec<PathBuf>) -> RealtimeHandle {
                 return;
             }
         };
+        // Ransomware guard: plant canary decoys across the watched folders.
+        let canaries = scanner_core::ransom_guard::deploy(&paths);
         let _ = tx.send(RealtimeMsg::Started(paths.len()));
         while !stop_thread.load(Ordering::Relaxed) {
             match watch.rx.recv_timeout(Duration::from_millis(300)) {
                 Ok(path) => {
+                    // A canary touched? Verify the content actually changed (our
+                    // own deploy-write hashes the same), then alarm on tamper.
+                    if scanner_core::ransom_guard::is_canary(&path) {
+                        if let Some(c) = canaries.iter().find(|c| c.path == path) {
+                            let tampered = std::fs::read(&c.path)
+                                .map(|b| scanner_core::hash_bytes(&b).sha256 != c.sha256)
+                                .unwrap_or(true);
+                            if tampered {
+                                history::record(
+                                    "realtime",
+                                    format!("RANSOMWARE: canary tampered — {}", c.path.display()),
+                                );
+                                let _ =
+                                    tx.send(RealtimeMsg::Ransomware(c.path.display().to_string()));
+                                let _ = scanner_core::ransom_guard::deploy(&paths);
+                                // restore decoys
+                            }
+                        }
+                        continue;
+                    }
                     let report = scanner.scan_file(&path);
                     if report.is_malicious() {
                         // Immediate response: isolate the threat the moment it
@@ -324,6 +348,7 @@ pub fn start_realtime(paths: Vec<PathBuf>) -> RealtimeHandle {
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
+        scanner_core::ransom_guard::cleanup(&canaries);
     });
     RealtimeHandle { rx, stop }
 }

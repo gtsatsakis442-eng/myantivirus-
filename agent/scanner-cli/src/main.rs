@@ -59,8 +59,31 @@ enum Command {
     /// Grow the signature database from scan logs (`scan --json`) — the
     /// feedback loop that turns confirmed detections into hash signatures.
     Ingest(IngestArgs),
+    /// Ransomware guard: plant canary files and alert on mass-encryption.
+    Guard {
+        /// Folders to protect (default: the Quick-Scan high-risk locations).
+        paths: Vec<PathBuf>,
+    },
+    /// Firewall control: block known C2 IPs via the OS firewall (needs admin/root).
+    Firewall {
+        #[command(subcommand)]
+        action: FirewallAction,
+    },
     /// Self-test: scan an EICAR sample to verify detection works end-to-end.
     Selftest,
+}
+
+#[derive(Subcommand, Debug)]
+enum FirewallAction {
+    /// Fetch the abuse.ch Feodo Tracker C2 IP blocklist and add drop rules.
+    Sync,
+    /// Block a single IPv4 address.
+    Block {
+        /// IPv4 address to block (outbound).
+        ip: String,
+    },
+    /// Remove all Talos-created firewall rules.
+    Flush,
 }
 
 #[derive(Args, Debug)]
@@ -169,6 +192,8 @@ fn main() -> ExitCode {
         Some(Command::Lookup { target }) => cmd_lookup(target),
         Some(Command::Watch { paths, enforce }) => cmd_watch(paths, enforce),
         Some(Command::Ingest(args)) => cmd_ingest(args),
+        Some(Command::Guard { paths }) => cmd_guard(paths),
+        Some(Command::Firewall { action }) => cmd_firewall(action),
         Some(Command::Selftest) => cmd_selftest(),
     }
 }
@@ -283,6 +308,70 @@ fn cmd_watch_enforce(_targets: &[PathBuf]) -> Result<()> {
         "--enforce (blocking real-time) is only available on Linux via fanotify; \
          on Windows, pre-execution blocking is the Phase-2 kernel minifilter"
     )
+}
+
+fn cmd_guard(paths: Vec<PathBuf>) -> ExitCode {
+    let targets = if paths.is_empty() {
+        paths::quick_scan_paths()
+    } else {
+        paths
+    };
+    let result = (|| -> Result<()> {
+        let canaries = scanner_core::ransom_guard::deploy(&targets);
+        if canaries.is_empty() {
+            anyhow::bail!("no writable folders to protect");
+        }
+        eprintln!(
+            "Ransomware guard: {} canary file(s) planted across {} folder(s). Ctrl-C to stop.",
+            canaries.len(),
+            targets.len()
+        );
+        eprintln!("(detection + alert; kernel behavioural rollback with VSS is Phase 2)");
+        loop {
+            let tampered = scanner_core::ransom_guard::check(&canaries);
+            if !tampered.is_empty() {
+                println!("[RANSOMWARE] canary tampered — possible mass-encryption in progress:");
+                for p in &tampered {
+                    println!("  {}", p.display());
+                }
+                // Restore the decoys and keep watching.
+                let _ = scanner_core::ransom_guard::deploy(&targets);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
+}
+
+fn cmd_firewall(action: FirewallAction) -> ExitCode {
+    use scanner_core::firewall;
+    let result = (|| -> Result<()> {
+        match action {
+            FirewallAction::Sync => {
+                eprintln!("Syncing C2 blocklist into the OS firewall (needs Administrator/root)…");
+                let report = firewall::sync_c2_blocklist(firewall::default_feodo_url())?;
+                for m in &report.messages {
+                    println!("  {m}");
+                }
+            }
+            FirewallAction::Block { ip } => {
+                firewall::block_ip(&ip)?;
+                println!("blocked outbound traffic to {ip}");
+            }
+            FirewallAction::Flush => {
+                firewall::flush()?;
+                println!("removed Talos firewall rules");
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
 }
 
 fn cmd_ingest(args: IngestArgs) -> ExitCode {
