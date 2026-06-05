@@ -41,6 +41,16 @@ enum Command {
     },
     /// Fetch & install signature feeds into the local store (broadens detection).
     Update(UpdateArgs),
+    /// Look up a hash (or a file's hash) against a free threat-intel API.
+    Lookup {
+        /// A SHA-256 hash, or a path to a file (its SHA-256 is computed).
+        target: String,
+    },
+    /// Real-time on-access monitoring: auto-scan files as they appear (user-mode).
+    Watch {
+        /// Folders to watch (default: the Quick-Scan high-risk locations).
+        paths: Vec<PathBuf>,
+    },
     /// Self-test: scan an EICAR sample to verify detection works end-to-end.
     Selftest,
 }
@@ -133,7 +143,79 @@ fn main() -> ExitCode {
         Some(Command::Scan(args)) => cmd_scan(args),
         Some(Command::Quarantine { dir, action }) => cmd_quarantine(dir, action),
         Some(Command::Update(args)) => cmd_update(args),
+        Some(Command::Lookup { target }) => cmd_lookup(target),
+        Some(Command::Watch { paths }) => cmd_watch(paths),
         Some(Command::Selftest) => cmd_selftest(),
+    }
+}
+
+fn cmd_lookup(target: String) -> ExitCode {
+    let result = (|| -> Result<()> {
+        // Accept either a SHA-256 directly or a path to a file.
+        let sha = if target.len() == 64 && target.bytes().all(|b| b.is_ascii_hexdigit()) {
+            target.clone()
+        } else {
+            let path = PathBuf::from(&target);
+            if !path.is_file() {
+                anyhow::bail!("not a SHA-256 hash or an existing file: {target}");
+            }
+            let bytes = std::fs::read(&path)?;
+            scanner_core::hash_bytes(&bytes).sha256
+        };
+        eprintln!("Looking up {sha} …");
+        let report = scanner_core::lookup_hash(&sha)?;
+        println!(
+            "[{}] {}",
+            report.source,
+            if report.found { "known" } else { "no record" }
+        );
+        for line in &report.lines {
+            println!("  {line}");
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
+}
+
+fn cmd_watch(paths: Vec<PathBuf>) -> ExitCode {
+    let targets = if paths.is_empty() {
+        paths::quick_scan_paths()
+    } else {
+        paths
+    };
+    let result = (|| -> Result<()> {
+        let (engine, _, _) = runner::load_engine(&EngineConfig::default())?;
+        let scanner = scanner_core::Scanner::new(&engine);
+        let watch = scanner_core::realtime::watch(&targets)?;
+        eprintln!(
+            "Real-time monitoring {} folder(s) — auto-scanning new/changed files. Ctrl-C to stop.",
+            targets.len()
+        );
+        eprintln!("(user-mode on-access; kernel minifilter is Phase 2)");
+        for path in watch.rx.iter() {
+            let report = scanner.scan_file(&path);
+            if report.is_malicious() || report.is_suspicious() {
+                let names: Vec<&str> = report.detections.iter().map(|d| d.name.as_str()).collect();
+                println!(
+                    "[{}] {}  [{}]",
+                    if report.is_malicious() {
+                        "THREAT"
+                    } else {
+                        "SUSPECT"
+                    },
+                    report.path,
+                    names.join(", ")
+                );
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
     }
 }
 
