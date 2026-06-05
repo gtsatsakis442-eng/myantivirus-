@@ -151,6 +151,9 @@ struct TalosApp {
     intel_lines: Vec<String>,
     intel_busy: bool,
     intel_rx: Option<Receiver<Result<Vec<scanner_core::IntelReport>, String>>>,
+
+    /// The Talos bronze-guardian emblem, lazily uploaded as a GPU texture.
+    hero_tex: Option<egui::TextureHandle>,
 }
 
 impl TalosApp {
@@ -191,6 +194,7 @@ impl TalosApp {
             intel_lines: Vec::new(),
             intel_busy: false,
             intel_rx: None,
+            hero_tex: None,
         }
     }
 
@@ -464,6 +468,15 @@ impl eframe::App for TalosApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll(ctx);
 
+        // Upload the bronze-guardian emblem to a texture once.
+        if self.hero_tex.is_none() {
+            let img = egui::ColorImage::from_rgba_unmultiplied(
+                [256, 256],
+                include_bytes!("../assets/talos_hero.rgba"),
+            );
+            self.hero_tex = Some(ctx.load_texture("talos_hero", img, egui::TextureOptions::LINEAR));
+        }
+
         egui::SidePanel::left("nav")
             .exact_width(212.0)
             .resizable(false)
@@ -491,9 +504,21 @@ impl eframe::App for TalosApp {
 
 impl TalosApp {
     fn sidebar(&mut self, ui: &mut egui::Ui) {
+        let hero = self.hero_tex.clone();
         ui.add_space(4.0);
-        ui.label(RichText::new("◆ TALOS").color(ACCENT).size(24.0).strong());
-        ui.label(RichText::new("Endpoint Protection").color(DIM).size(12.0));
+        ui.horizontal(|ui| {
+            if let Some(tex) = &hero {
+                ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                    tex.id(),
+                    egui::vec2(40.0, 40.0),
+                )));
+                ui.add_space(2.0);
+            }
+            ui.vertical(|ui| {
+                ui.label(RichText::new("TALOS").color(ACCENT).size(23.0).strong());
+                ui.label(RichText::new("Endpoint Protection").color(DIM).size(11.0));
+            });
+        });
         ui.add_space(16.0);
 
         nav_section(ui, "SECURITY");
@@ -549,14 +574,33 @@ impl TalosApp {
             (GREEN, "You're protected", sub)
         };
 
-        // Hero protection-status card with the primary action inline.
+        // Hero protection-status banner: bronze guardian + status + action.
+        let hero = self.hero_tex.clone();
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("●").color(status_col).size(46.0));
-                ui.add_space(12.0);
+                if let Some(tex) = &hero {
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        tex.id(),
+                        egui::vec2(118.0, 118.0),
+                    )));
+                    ui.add_space(14.0);
+                } else {
+                    ui.label(RichText::new("●").color(status_col).size(46.0));
+                    ui.add_space(12.0);
+                }
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(title).color(TEXT).size(24.0).strong());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("●").color(status_col).size(16.0));
+                        ui.label(RichText::new(title).color(TEXT).size(24.0).strong());
+                    });
                     ui.label(RichText::new(subtitle).color(DIM).size(13.0));
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new("Talos — the bronze guardian")
+                            .color(AMBER)
+                            .size(11.0)
+                            .italics(),
+                    );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = if self.scanning {
@@ -1284,15 +1328,37 @@ impl TalosApp {
 
     fn about(&mut self, ui: &mut egui::Ui) {
         heading(ui, "About");
+        let hero = self.hero_tex.clone();
         card(ui, CARD, |ui| {
-            ui.label(
-                RichText::new("Talos EPP — Endpoint Protection Platform")
-                    .color(TEXT)
-                    .size(16.0)
-                    .strong(),
-            );
-            ui.label(RichText::new(format!("Version {}", self.version)).color(DIM));
-            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if let Some(tex) = &hero {
+                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                        tex.id(),
+                        egui::vec2(128.0, 128.0),
+                    )));
+                    ui.add_space(14.0);
+                }
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new("Talos EPP — Endpoint Protection Platform")
+                            .color(TEXT)
+                            .size(16.0)
+                            .strong(),
+                    );
+                    ui.label(RichText::new(format!("Version {}", self.version)).color(DIM));
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(
+                            "Named for Talos — the giant bronze automaton of Greek myth that \
+                             circled Crete three times a day to guard it from invaders.",
+                        )
+                        .color(AMBER)
+                        .size(12.0)
+                        .italics(),
+                    );
+                });
+            });
+            ui.add_space(10.0);
             ui.label(RichText::new("Detection layers").color(TEXT).strong());
             ui.label(RichText::new("• Hash signatures (SHA-256)").color(DIM));
             ui.label(

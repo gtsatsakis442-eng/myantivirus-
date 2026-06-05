@@ -1,5 +1,10 @@
 # Talos EPP — Enterprise Endpoint Protection Platform
 
+> Named for **Talos**, the giant bronze automaton of Greek myth that circled
+> Crete three times a day to guard it from invaders — the app's bronze-guardian
+> emblem (in the GUI's dashboard, sidebar and About) is generated from scratch
+> by `tools/make_hero.py`.
+
 > **Status:** Phase 1 shipping — working GUI + CLI app (multi-layer on-demand
 > scanner with live signature updates). Phases 2+ (kernel sensor, ML, cloud)
 > remain design/roadmap.
