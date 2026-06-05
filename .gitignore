@@ -9,6 +9,10 @@
 *.wixobj
 installer/**/obj/
 
+# Python tooling
+__pycache__/
+*.pyc
+
 # Editor / OS
 .DS_Store
 .vscode/

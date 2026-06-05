@@ -127,6 +127,12 @@ To keep false positives low, the heuristic layer **trusts Authenticode-signed
 binaries** (so signed Microsoft/vendor DLLs aren't flagged) and only raises
 *suspicious* when **two or more** independent signals agree.
 
+The Windows binaries are proper apps: each carries the **Talos icon** and
+**version/product metadata** (shown in Explorer, the taskbar, and
+Properties → Details), embedded at build time from `assets/talos.ico`
+(regenerate with `tools/make_icon.py`). The GUI uses the same artwork as its
+window/taskbar icon.
+
 📖 **Full usage guide:** [docs/USAGE.md](docs/USAGE.md) — install, commands,
 **updating signatures**, quarantine, troubleshooting.
 
