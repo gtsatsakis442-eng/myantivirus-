@@ -122,7 +122,7 @@ leading suites (Bitdefender, Malwarebytes, ESET, Kaspersky) approachable:
 | Area | What it gives you |
 |---|---|
 | **Dashboard** | protection-status hero + a **Security Advisor** that recommends contextual actions (run a scan, update, review quarantine) computed from real state |
-| **Protection** | module grid with on/off toggles, including a **Real-time Protection** switch that starts *user-mode on-access monitoring* (auto-scans new/changed files). Truly kernel-level modules (pre-execution blocking, web, firewall, ransomware rollback) stay **Roadmap** — labeled, not faked |
+| **Protection** | module grid with on/off toggles, including a **Real-time Protection** switch — on-access **scan + instant auto-quarantine** of new/changed files. On **Linux**, `talos watch --enforce` does true **blocking** on-access via `fanotify` (allow/deny each open & exec, like ClamAV's `clamonacc`). True pre-execution *blocking on Windows* (kernel minifilter + AMSI), web, firewall, ransomware rollback stay **Roadmap** — labeled, not faked |
 | **Scan** | Quick / Full / Custom with live progress and per-detection results |
 | **Quarantine** | isolate, restore, delete |
 | **Activity** | a persisted log of scans, updates, real-time hits and quarantine actions |
@@ -178,7 +178,8 @@ talos scan C:\path --quarantine    # scan + isolate detected threats
 talos scan C:\path --json          # NDJSON telemetry (see docs/07)
 talos update                       # fetch the latest signatures (abuse.ch + open YARA)
 talos lookup <sha256|file>         # threat-intel lookup (VirusTotal / MalwareBazaar)
-talos watch [folders...]           # real-time on-access monitoring (user-mode)
+talos watch [folders...]           # real-time: scan + auto-quarantine on access
+talos watch --enforce              # real-time BLOCKING via fanotify (Linux, root)
 talos quarantine list              # review the vault
 talos quarantine restore <id>      # restore a false positive
 ```

@@ -294,10 +294,24 @@ pub fn start_realtime(paths: Vec<PathBuf>) -> RealtimeHandle {
             match watch.rx.recv_timeout(Duration::from_millis(300)) {
                 Ok(path) => {
                     let report = scanner.scan_file(&path);
-                    if report.is_malicious() || report.is_suspicious() {
+                    if report.is_malicious() {
+                        // Immediate response: isolate the threat the moment it
+                        // lands (the strongest user-mode action short of the
+                        // Phase-2 kernel minifilter's pre-execution block).
+                        let isolated = quarantine_one(&report);
                         history::record(
                             "realtime",
-                            format!("Real-time detection: {}", report.path),
+                            format!(
+                                "Real-time: {} {}",
+                                if isolated { "quarantined" } else { "detected" },
+                                report.path
+                            ),
+                        );
+                        let _ = tx.send(RealtimeMsg::Detection(Box::new(report)));
+                    } else if report.is_suspicious() {
+                        history::record(
+                            "realtime",
+                            format!("Real-time: suspicious {}", report.path),
                         );
                         let _ = tx.send(RealtimeMsg::Detection(Box::new(report)));
                     }
@@ -318,6 +332,21 @@ pub fn start_intel(sha256: String) -> Receiver<Result<Vec<scanner_core::IntelRep
         let _ = tx.send(r);
     });
     rx
+}
+
+/// Quarantine a single malicious report immediately (real-time response).
+fn quarantine_one(report: &ScanReport) -> bool {
+    if let (Ok(store), Some(h)) = (Quarantine::open(quarantine_dir()), report.hashes.as_ref()) {
+        return store
+            .quarantine_file(
+                Path::new(&report.path),
+                &h.sha256,
+                report.size,
+                report.detections.clone(),
+            )
+            .is_ok();
+    }
+    false
 }
 
 /// Quarantine the malicious reports; returns how many were isolated.

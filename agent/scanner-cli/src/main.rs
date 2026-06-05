@@ -46,10 +46,15 @@ enum Command {
         /// A SHA-256 hash, or a path to a file (its SHA-256 is computed).
         target: String,
     },
-    /// Real-time on-access monitoring: auto-scan files as they appear (user-mode).
+    /// Real-time on-access protection: auto-scan files as they appear, or
+    /// (with --enforce) block malicious open/exec in real time.
     Watch {
         /// Folders to watch (default: the Quick-Scan high-risk locations).
         paths: Vec<PathBuf>,
+        /// Enforce: block malicious open/exec in real time via fanotify
+        /// (Linux only, requires root / CAP_SYS_ADMIN).
+        #[arg(long)]
+        enforce: bool,
     },
     /// Self-test: scan an EICAR sample to verify detection works end-to-end.
     Selftest,
@@ -144,7 +149,7 @@ fn main() -> ExitCode {
         Some(Command::Quarantine { dir, action }) => cmd_quarantine(dir, action),
         Some(Command::Update(args)) => cmd_update(args),
         Some(Command::Lookup { target }) => cmd_lookup(target),
-        Some(Command::Watch { paths }) => cmd_watch(paths),
+        Some(Command::Watch { paths, enforce }) => cmd_watch(paths, enforce),
         Some(Command::Selftest) => cmd_selftest(),
     }
 }
@@ -182,13 +187,16 @@ fn cmd_lookup(target: String) -> ExitCode {
     }
 }
 
-fn cmd_watch(paths: Vec<PathBuf>) -> ExitCode {
+fn cmd_watch(paths: Vec<PathBuf>, enforce: bool) -> ExitCode {
     let targets = if paths.is_empty() {
         paths::quick_scan_paths()
     } else {
         paths
     };
     let result = (|| -> Result<()> {
+        if enforce {
+            return cmd_watch_enforce(&targets);
+        }
         let (engine, _, _) = runner::load_engine(&EngineConfig::default())?;
         let scanner = scanner_core::Scanner::new(&engine);
         let watch = scanner_core::realtime::watch(&targets)?;
@@ -196,7 +204,10 @@ fn cmd_watch(paths: Vec<PathBuf>) -> ExitCode {
             "Real-time monitoring {} folder(s) — auto-scanning new/changed files. Ctrl-C to stop.",
             targets.len()
         );
-        eprintln!("(user-mode on-access; kernel minifilter is Phase 2)");
+        eprintln!(
+            "(user-mode on-access detection; use --enforce to BLOCK on Linux, \
+             or the Phase-2 minifilter on Windows)"
+        );
         for path in watch.rx.iter() {
             let report = scanner.scan_file(&path);
             if report.is_malicious() || report.is_suspicious() {
@@ -219,6 +230,40 @@ fn cmd_watch(paths: Vec<PathBuf>) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => fail(e),
     }
+}
+
+/// Blocking real-time enforcement via fanotify (Linux only).
+#[cfg(target_os = "linux")]
+fn cmd_watch_enforce(targets: &[PathBuf]) -> Result<()> {
+    use scanner_core::realtime::{enforce, EnforceEvent};
+    use std::sync::atomic::AtomicBool;
+
+    let (mut engine, _, _) = runner::load_engine(&EngineConfig::default())?;
+    // Enforcement only denies on high-confidence hash/YARA hits, so skip the
+    // slower suspicion layers in the hot path.
+    engine.set_heuristics(false);
+    engine.set_behavior(false);
+    let stop = AtomicBool::new(false);
+    eprintln!(
+        "Real-time ENFORCING — malicious open/exec under {} location(s) will be BLOCKED. Ctrl-C to stop.",
+        targets.len()
+    );
+    enforce(&engine, targets, 128 * 1024 * 1024, &stop, |ev| match ev {
+        EnforceEvent::Ready(n) => eprintln!("fanotify active on {n} mount(s)."),
+        EnforceEvent::Blocked(b) => {
+            let names: Vec<&str> = b.detections.iter().map(|d| d.name.as_str()).collect();
+            println!("[BLOCKED] {}  [{}]", b.path, names.join(", "));
+        }
+    })?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn cmd_watch_enforce(_targets: &[PathBuf]) -> Result<()> {
+    anyhow::bail!(
+        "--enforce (blocking real-time) is only available on Linux via fanotify; \
+         on Windows, pre-execution blocking is the Phase-2 kernel minifilter"
+    )
 }
 
 fn cmd_update(args: UpdateArgs) -> ExitCode {

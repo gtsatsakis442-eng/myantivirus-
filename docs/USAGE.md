@@ -68,9 +68,9 @@ Double-click **`talos-gui.exe`** to open the security console:
   suggests one-click actions (run a scan, update signatures, review quarantine)
   based on your real state.
 - **Protection** — a module grid with on/off toggles, including a **Real-time
-  Protection** switch that starts *user-mode on-access monitoring* (auto-scans
-  files as they appear in Downloads, Temp, …). Kernel-level modules
-  (pre-execution blocking, web, firewall, ransomware rollback) are **Roadmap**.
+  Protection** switch: on-access **scan + instant auto-quarantine** of new/changed
+  files (true *blocking* on Linux via `talos watch --enforce`; see §6.5). The
+  Windows kernel minifilter, web, firewall and ransomware rollback are **Roadmap**.
 - **Scan** — Quick / Full / Custom with live progress and per-detection results.
 - **Quarantine** — isolate / restore / delete.
 - **Activity** — a persisted log of scans, updates, real-time hits, quarantine.
@@ -100,7 +100,8 @@ talos scan /path --show-clean       # also list clean files
 talos scan /path --no-behavior      # skip the behavioral capability layer
 talos update                        # fetch the latest signatures (see §6)
 talos lookup <sha256|file>          # threat-intel lookup (free API; see §9)
-talos watch [folders...]            # real-time on-access monitoring (user-mode)
+talos watch [folders...]            # real-time: scan + auto-quarantine on access
+talos watch --enforce               # real-time BLOCKING via fanotify (Linux, root)
 ```
 
 ### Quarantine management
@@ -220,15 +221,23 @@ talos lookup C:\Users\me\Downloads\suspicious.exe   # hashes the file, then look
 talos lookup 275a021b…fd0f                           # or pass a SHA-256 directly
 ```
 
-**Real-time protection** (`talos watch`, or the GUI **Protection → Real-time**
-toggle) watches high-risk folders and **auto-scans files as they are created or
-modified**. This is *user-mode on-access* monitoring — a real first step toward
-the roadmap's real-time module. True *pre-execution blocking* needs a kernel
-file-system minifilter and remains Phase 2 (see [docs/01](01-core-architecture.md)).
+**Real-time protection** comes in two backends, chosen by what each OS lets a
+user-mode process do — the same split the major products use:
+
+| Backend | Platform | What it does |
+|---|---|---|
+| **Monitoring + auto-quarantine** | all (GUI toggle, `talos watch`) | reacts to file create/modify, scans, and **instantly quarantines** a malicious file on access |
+| **Enforcing (blocking)** | **Linux** (`talos watch --enforce`, needs root) | intercepts every **open/exec** via **fanotify** `FAN_OPEN_PERM`/`FAN_OPEN_EXEC_PERM`, scans, and **denies** access to malicious files in real time — the mechanism ClamAV's `clamonacc` uses |
+
+True *pre-execution blocking on Windows* needs a kernel file-system **minifilter**
+(+ **AMSI** for scripts/memory) — a signed-driver effort that's Phase 2 (see
+[docs/01](01-core-architecture.md)). Until then, Windows uses the monitoring +
+instant-auto-quarantine backend.
 
 ```bash
-talos watch                       # watch the Quick-Scan high-risk folders
-talos watch C:\Users\me\Downloads # watch specific folders (Ctrl-C to stop)
+talos watch                       # monitor + auto-quarantine (Quick-Scan folders)
+talos watch C:\Users\me\Downloads # monitor specific folders (Ctrl-C to stop)
+sudo talos watch --enforce /home  # Linux: BLOCK malicious open/exec in real time
 ```
 
 ---

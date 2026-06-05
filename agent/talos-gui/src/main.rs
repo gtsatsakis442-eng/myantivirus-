@@ -776,11 +776,12 @@ impl TalosApp {
         let mut rt_on = self.realtime.is_some();
         let rt_desc = if self.realtime.is_some() {
             format!(
-                "On-access watch ACTIVE — {} folder(s), {} hit(s). Kernel minifilter = Phase 2.",
+                "ACTIVE — on-access scan + auto-quarantine · {} folder(s) · {} hit(s)",
                 self.realtime_paths, self.realtime_hits
             )
         } else {
-            "Auto-scan new/changed files in Downloads, Temp, … (kernel minifilter = Phase 2)."
+            "On-access scan + instant auto-quarantine of new/changed files. Pre-execution \
+             blocking = Phase-2 minifilter (Windows) or `talos watch --enforce` (Linux/fanotify)."
                 .to_string()
         };
         if module_toggle(ui, "Real-time Protection", &rt_desc, &mut rt_on) {
@@ -1374,7 +1375,7 @@ impl TalosApp {
             );
             ui.label(RichText::new("• ZIP archive inspection (zip-bomb-guarded)").color(DIM));
             ui.label(
-                RichText::new("• Real-time on-access monitoring (user-mode folder watch)")
+                RichText::new("• Real-time on-access protection (scan + auto-quarantine; fanotify blocking on Linux)")
                     .color(DIM),
             );
             ui.label(

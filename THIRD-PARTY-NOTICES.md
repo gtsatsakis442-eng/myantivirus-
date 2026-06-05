@@ -87,6 +87,8 @@ components:
 - **`yara-x`** — VirusTotal's pure-Rust YARA engine (the YARA scanning layer).
 - **`goblin`** — PE/object parsing for static heuristics & behavioral analysis.
 - **`notify`** — cross-platform filesystem watching (real-time on-access monitor).
+- **`nix`** (Linux only) — safe `fanotify` bindings for blocking on-access
+  enforcement (`talos watch --enforce`).
 - **`eframe` / `egui`** — the GUI toolkit (`talos-gui`).
 - **`rayon`**, **`walkdir`**, **`zip`**, **`sha2` / `sha1` / `md-5`**,
   **`clap`**, **`serde` / `serde_json`**, **`tempfile`**.
