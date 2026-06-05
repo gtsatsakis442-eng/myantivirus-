@@ -7,12 +7,17 @@
 //!
 //! Sources (opt-in), with licenses to respect:
 //!  * **abuse.ch MalwareBazaar** SHA-256 hashes — license **CC0** (public domain)
+//!  * **abuse.ch ThreatFox** IOC SHA-256 hashes — **CC0**; needs a free Auth-Key
 //!  * **Open YARA** rule files (e.g. Neo23x0/signature-base — **DRL**;
 //!    YARA-Rules — **GPL**) — fetched at the user's request; attribution kept
 //!  * **ClamAV** `.hsb` SHA-256 hash signatures — **GPL**; bring-your-own URL
 //!
 //! Only SHA-256 entries are ingested (the engine is SHA-256-keyed), so ClamAV
 //! `.hdb` (MD5) lines are skipped.
+//!
+//! Hardening: downloads are restricted to **HTTPS** (`curl --proto =https
+//! --tlsv1.2`), size-capped (`--max-filesize`), and time-bounded; one feed
+//! failing never aborts the others.
 
 use std::path::Path;
 use std::process::Command;
@@ -23,10 +28,12 @@ use crate::error::{Result, ScanError};
 #[derive(Debug, Clone)]
 pub struct UpdateOptions {
     pub abuse_ch: bool,
+    pub threatfox: bool,
     pub open_yara: bool,
     pub clamav: bool,
     pub abuse_ch_url: String,
     pub abuse_ch_auth: Option<String>,
+    pub threatfox_url: String,
     pub yara_urls: Vec<String>,
     pub clamav_url: Option<String>,
 }
@@ -35,11 +42,14 @@ impl Default for UpdateOptions {
     fn default() -> Self {
         Self {
             abuse_ch: true,
+            // abuse.ch ThreatFox IOC hashes (CC0); needs a free Auth-Key.
+            threatfox: true,
             open_yara: true,
             // GPL + large + host-specific: opt-in, bring-your-own URL.
             clamav: false,
             abuse_ch_url: "https://bazaar.abuse.ch/export/txt/sha256/recent/".to_string(),
             abuse_ch_auth: env_nonempty("TALOS_ABUSE_KEY"),
+            threatfox_url: "https://threatfox.abuse.ch/export/csv/sha256/recent/".to_string(),
             yara_urls: default_yara_urls(),
             clamav_url: env_nonempty("TALOS_CLAMAV_URL"),
         }
@@ -59,12 +69,18 @@ fn default_yara_urls() -> Vec<String> {
             .collect();
     }
     // A small, broad selection from Neo23x0/signature-base (DRL-licensed).
+    // Incompatible files are skipped gracefully by the lenient YARA compiler,
+    // so adding more candidates only ever broadens coverage. For a much larger
+    // set, point TALOS_YARA_URLS at YARA Forge / ReversingLabs / YARA-Rules.
     [
         "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/gen_webshells.yar",
         "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/gen_metasploit_payloads.yar",
         "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/apt_cobaltstrike.yar",
         "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/expl_proxyshell.yar",
         "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/gen_fake_amsi_dll.yar",
+        "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/expl_log4j_cve_2021_44228.yar",
+        "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/gen_mimikatz.yar",
+        "https://raw.githubusercontent.com/Neo23x0/signature-base/master/yara/gen_susp_obfuscation.yar",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -99,6 +115,25 @@ pub fn update(store: &Path, opts: &UpdateOptions) -> UpdateReport {
                     .push(format!("abuse.ch MalwareBazaar: {} hashes", n.0));
             }
             Err(e) => report.messages.push(format!("abuse.ch: {e}")),
+        }
+    }
+
+    if opts.threatfox {
+        match opts.abuse_ch_auth.as_deref() {
+            Some(key) => match fetch_text(&opts.threatfox_url, Some(key)) {
+                Ok(text) => {
+                    let n = parse_csv_hashes(&text, "ThreatFox");
+                    let _ = std::fs::write(hashes_dir.join("threatfox.hashdb"), &n.1);
+                    report.hashes_added += n.0;
+                    report
+                        .messages
+                        .push(format!("abuse.ch ThreatFox: {} hashes", n.0));
+                }
+                Err(e) => report.messages.push(format!("ThreatFox: {e}")),
+            },
+            None => report.messages.push(
+                "ThreatFox: set TALOS_ABUSE_KEY (free abuse.ch account) to enable".to_string(),
+            ),
         }
     }
 
@@ -159,6 +194,10 @@ fn sanitize_name(name: &str) -> String {
 }
 
 fn fetch_text(url: &str, auth: Option<&str>) -> Result<String> {
+    // Hardening: only ever fetch over HTTPS, regardless of feed configuration.
+    if !url.starts_with("https://") {
+        return Err(ScanError::Update(format!("refusing non-HTTPS URL: {url}")));
+    }
     let tmp = std::env::temp_dir().join(format!(
         "talos-feed-{}-{}.tmp",
         std::process::id(),
@@ -166,10 +205,19 @@ fn fetch_text(url: &str, auth: Option<&str>) -> Result<String> {
     ));
     let mut cmd = Command::new("curl");
     cmd.arg("-fsSL")
+        // Force TLS and forbid protocol downgrade on redirects.
+        .arg("--proto")
+        .arg("=https")
+        .arg("--tlsv1.2")
         .arg("--max-time")
         .arg("180")
+        // Cap downloads at 256 MiB so a hostile/huge feed can't exhaust disk.
+        .arg("--max-filesize")
+        .arg("268435456")
+        .arg("--retry")
+        .arg("2")
         .arg("-A")
-        .arg("talos-epp/0.1");
+        .arg("talos-epp/0.3");
     if let Some(a) = auth {
         cmd.arg("-H").arg(format!("Auth-Key: {a}"));
     }
@@ -209,6 +257,31 @@ fn parse_sha256_list(text: &str, family: &str) -> (usize, String) {
             out.push_str(family);
             out.push('\n');
             n += 1;
+        }
+    }
+    (n, out)
+}
+
+/// Parse a CSV export (e.g. abuse.ch ThreatFox), collecting the first 64-hex
+/// SHA-256 field on each row. Tolerant of quoting, headers, and extra columns.
+fn parse_csv_hashes(text: &str, family: &str) -> (usize, String) {
+    let mut out = String::new();
+    let mut n = 0;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        for field in line.split(',') {
+            let f = field.trim().trim_matches('"').to_ascii_lowercase();
+            if f.len() == 64 && f.bytes().all(|b| b.is_ascii_hexdigit()) {
+                out.push_str(&f);
+                out.push_str("  ");
+                out.push_str(family);
+                out.push('\n');
+                n += 1;
+                break; // one hash per row
+            }
         }
     }
     (n, out)
@@ -262,6 +335,25 @@ mod tests {
         let (n, text) = parse_clamav_hashes(input);
         assert_eq!(n, 1, "only the SHA-256 line is kept");
         assert!(text.contains("ClamAV.Win.Test.EICAR_HDB-1"));
+    }
+
+    #[test]
+    fn csv_hashes_extracts_sha256_column() {
+        // ThreatFox-style CSV row: timestamp, id, the SHA-256 ioc, type, …
+        let input = "# comment line\n\
+                     \"2024-01-01 00:00:00\",\"123\",\"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f\",\"sha256_hash\",\"Cobalt Strike\"\n\
+                     \"2024-01-01 00:00:01\",\"124\",\"deadbeef\",\"md5_hash\",\"x\"\n";
+        let (n, text) = parse_csv_hashes(input, "ThreatFox");
+        assert_eq!(n, 1, "only the row with a SHA-256 field is kept");
+        assert!(text.contains(
+            "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f  ThreatFox"
+        ));
+    }
+
+    #[test]
+    fn fetch_text_refuses_non_https() {
+        let err = fetch_text("http://example.com/x", None);
+        assert!(matches!(err, Err(ScanError::Update(_))));
     }
 
     #[test]

@@ -633,6 +633,16 @@ impl TalosApp {
             self.config.heuristics = h;
             self.config.save();
         }
+        let mut b = self.config.behavior;
+        if module_toggle(
+            ui,
+            "Behavioral Analysis",
+            "CAPA-style capability inference from imports & strings, MITRE ATT&CK-tagged.",
+            &mut b,
+        ) {
+            self.config.behavior = b;
+            self.config.save();
+        }
         let mut a = self.config.scan_archives;
         if module_toggle(
             ui,
@@ -963,6 +973,15 @@ impl TalosApp {
                 dirty = true;
             }
             if ui
+                .checkbox(
+                    &mut self.config.behavior,
+                    "Behavioral analysis (capability inference, MITRE ATT&CK)",
+                )
+                .changed()
+            {
+                dirty = true;
+            }
+            if ui
                 .checkbox(&mut self.config.follow_symlinks, "Follow symbolic links")
                 .changed()
             {
@@ -1079,6 +1098,10 @@ impl TalosApp {
             );
             ui.label(
                 RichText::new("• Static PE heuristics (packing, injection imports, W^X)")
+                    .color(DIM),
+            );
+            ui.label(
+                RichText::new("• Behavioral capability analysis (CAPA-style, MITRE ATT&CK)")
                     .color(DIM),
             );
             ui.label(RichText::new("• ZIP archive inspection (zip-bomb-guarded)").color(DIM));

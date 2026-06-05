@@ -11,13 +11,14 @@ architecture, see [the docs index](../README.md#document-index).
 
 ## 1. What it does
 
-Talos scans files and flags threats using three layers:
+Talos scans files and flags threats using four layers:
 
 | Layer | What it catches | Verdict |
 |---|---|---|
 | **Hash signatures** | exact known-bad files (SHA-256) | malicious |
 | **YARA rules** | known patterns (EICAR, web shells, malicious PowerShell) | malicious |
 | **Static heuristics** | packed **code** sections, process-injection imports, W^X sections — needs **≥2 signals**; Authenticode-signed files are trusted | **suspicious** |
+| **Behavioral analysis** | CAPA-style capabilities inferred from a PE's imports & strings, MITRE ATT&CK-tagged (injection, credential access, ransomware, AMSI/ETW bypass, persistence, C2, …); score-gated + signed-file-trusted | **suspicious** |
 
 It also looks **inside ZIP archives**, and can **quarantine** (isolate) detected
 files and later **restore** them.
@@ -29,6 +30,10 @@ files and later **restore** them.
   (Authenticode) binaries** — so signed Microsoft/vendor DLLs are not flagged —
   and only raises *suspicious* when **two or more** independent signals agree.
   Known-bad files are still caught by the hash and YARA layers regardless.
+- **Behavioral analysis** is *static* (it reads a file's imports & strings, it
+  never executes it) and is likewise signed-file-trusted and score-gated. True
+  *runtime* behavioral monitoring (process/file/registry/network telemetry)
+  arrives with the Phase-2 kernel sensor.
 
 ---
 
@@ -115,6 +120,7 @@ talos quarantine purge --all        # empty the vault
 | `--threads <N>` | worker threads for directory scans (`0` = all CPU cores) | 0 |
 | `--follow-symlinks` | follow symlinks while walking | off |
 | `--no-yara` | hash-only (skip YARA) | off |
+| `--no-behavior` | skip the static behavioral capability layer | off |
 | `--hashes <file>` / `--rules <dir>` | merge extra signatures on top of the built-in baseline + local store | — |
 
 **Exit codes:** `0` clean · `1` threat detected · `2` error.
@@ -161,6 +167,7 @@ talos update --clamav-url <url>       # also pull a ClamAV .hsb SHA-256 list (op
 | Feed | Content | License | Default |
 |---|---|---|---|
 | **abuse.ch MalwareBazaar** | recent malware **SHA-256** hashes | CC0 (public domain) | **on** |
+| **abuse.ch ThreatFox** | IOC **SHA-256** hashes (CSV export) | CC0 (public domain) | **on** (needs `TALOS_ABUSE_KEY`) |
 | **Open YARA** (Neo23x0/signature-base) | curated `*.yar` rules (web shells, offensive tooling, APT/Cobalt Strike, exploits, AMSI tampering) | DRL 1.1 | **on** |
 | **ClamAV** | `.hsb` **SHA-256** hash signatures (MD5 lines skipped) | GPL-2.0 | off (opt-in) |
 

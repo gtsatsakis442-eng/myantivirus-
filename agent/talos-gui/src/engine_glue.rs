@@ -180,6 +180,7 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
             }
         };
         engine.set_heuristics(cfg.heuristics);
+        engine.set_behavior(cfg.behavior);
         let scanner = Scanner::with_options(&engine, scan_options(&cfg));
         let mut summary = ScanSummary::default();
         let started = std::time::Instant::now();

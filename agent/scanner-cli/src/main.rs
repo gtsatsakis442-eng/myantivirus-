@@ -86,6 +86,9 @@ struct ScanArgs {
     /// Disable the YARA layer (hash-only).
     #[arg(long)]
     no_yara: bool,
+    /// Disable the static behavioral capability layer (CAPA-style).
+    #[arg(long)]
+    no_behavior: bool,
     /// Override the hash database path.
     #[arg(long)]
     hashes: Option<PathBuf>,
@@ -207,7 +210,8 @@ fn cmd_scan(args: ScanArgs) -> ExitCode {
             rules: args.rules.clone(),
             no_yara: args.no_yara,
         };
-        let (engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
+        let (mut engine, hash_count, yara_files) = runner::load_engine(&cfg)?;
+        engine.set_behavior(!args.no_behavior);
         if !args.json {
             eprintln!("talos: {hash_count} hash signature(s), {yara_files} YARA file(s)");
         }
