@@ -163,14 +163,16 @@ fn cmd_lookup(target: String) -> ExitCode {
             scanner_core::hash_bytes(&bytes).sha256
         };
         eprintln!("Looking up {sha} …");
-        let report = scanner_core::lookup_hash(&sha)?;
-        println!(
-            "[{}] {}",
-            report.source,
-            if report.found { "known" } else { "no record" }
-        );
-        for line in &report.lines {
-            println!("  {line}");
+        let reports = scanner_core::lookup_hash(&sha)?;
+        for report in &reports {
+            println!(
+                "[{}] {}",
+                report.source,
+                if report.found { "known" } else { "no record" }
+            );
+            for line in &report.lines {
+                println!("  {line}");
+            }
         }
         Ok(())
     })();

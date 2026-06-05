@@ -109,6 +109,12 @@ API key; Talos neither bundles nor redistributes their data:
   subject to the VirusTotal Terms of Service / API usage policy.
 - **abuse.ch MalwareBazaar** (`Auth-Key`, `TALOS_ABUSE_KEY`) — CC0 data —
   https://bazaar.abuse.ch/api/
+- **MalShare** (`api_key`, `TALOS_MALSHARE_KEY`) — https://malshare.com — free
+  community service; respect its API terms.
+- **AlienVault OTX / LevelBlue** (`X-OTX-API-KEY`, `TALOS_OTX_KEY`) —
+  https://otx.alienvault.com — Open Threat Exchange API terms.
+- **Hybrid Analysis** (Falcon Sandbox) (`api-key`, `TALOS_HYBRID_KEY`) —
+  https://www.hybrid-analysis.com — CrowdStrike Falcon Sandbox API terms.
 
 Respect each provider's rate limits and terms when using these lookups.
 

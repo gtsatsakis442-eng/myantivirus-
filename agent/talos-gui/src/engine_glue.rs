@@ -310,8 +310,8 @@ pub fn start_realtime(paths: Vec<PathBuf>) -> RealtimeHandle {
     RealtimeHandle { rx, stop }
 }
 
-/// Spawn a background threat-intel lookup of `sha256`.
-pub fn start_intel(sha256: String) -> Receiver<Result<scanner_core::IntelReport, String>> {
+/// Spawn a background threat-intel lookup of `sha256` (across all providers).
+pub fn start_intel(sha256: String) -> Receiver<Result<Vec<scanner_core::IntelReport>, String>> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let r = scanner_core::lookup_hash(&sha256).map_err(|e| e.to_string());
