@@ -143,6 +143,68 @@ impl HashSignatureDb {
     }
 }
 
+/// Keep only characters safe for a one-token family label.
+fn sanitize_family(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':'))
+        .collect()
+}
+
+/// Turn NDJSON scan reports (the output of `scan --json`) into hash-signature
+/// database text — the **feedback loop** that grows the database from real
+/// scans.
+///
+/// Extracts the SHA-256 of every **malicious** report (and **suspicious** too
+/// when `include_suspicious`), labelled by its first detection name or, failing
+/// that, `family`. Returns `(unique_count, hashdb_text)` in our
+/// `<sha256>  Family` format; duplicates within the input are merged.
+///
+/// Only the hash + label are taken — file paths and other telemetry are ignored,
+/// so a shared log reveals no local paths. The caller is responsible for vetting
+/// that the entries are genuinely malicious before shipping them (a hash
+/// signature is exact-match and permanent).
+pub fn ingest_reports(ndjson: &str, include_suspicious: bool, family: &str) -> (usize, String) {
+    use serde_json::Value;
+
+    let mut out = String::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in ndjson.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let v: Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let disp = v.get("disposition").and_then(Value::as_str).unwrap_or("");
+        if disp != "malicious" && !(include_suspicious && disp == "suspicious") {
+            continue;
+        }
+        let sha = match v.pointer("/hashes/sha256").and_then(Value::as_str) {
+            Some(s) => s.trim().to_ascii_lowercase(),
+            None => continue,
+        };
+        if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        if !seen.insert(sha.clone()) {
+            continue;
+        }
+        let label = v
+            .pointer("/detections/0/name")
+            .and_then(Value::as_str)
+            .map(sanitize_family)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| family.to_string());
+        out.push_str(&sha);
+        out.push_str("  ");
+        out.push_str(&label);
+        out.push('\n');
+    }
+    (seen.len(), out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +235,22 @@ mod tests {
     fn unnamed_signature_gets_placeholder() {
         let db = HashSignatureDb::from_str_db(EICAR_SHA256).unwrap();
         assert_eq!(db.lookup(EICAR_SHA256), Some("Unnamed.Signature"));
+    }
+
+    #[test]
+    fn ingest_extracts_malicious_hashes_only_by_default() {
+        let a = "a".repeat(64);
+        let b = "b".repeat(64);
+        let log = format!(
+            "{{\"path\":\"/x/evil\",\"disposition\":\"malicious\",\"hashes\":{{\"sha256\":\"{EICAR_SHA256}\"}},\"detections\":[{{\"name\":\"Eicar.Test.File\"}}]}}\n\
+             {{\"path\":\"/x/ok\",\"disposition\":\"clean\",\"hashes\":{{\"sha256\":\"{a}\"}}}}\n\
+             {{\"path\":\"/x/susp\",\"disposition\":\"suspicious\",\"hashes\":{{\"sha256\":\"{b}\"}}}}\n"
+        );
+        let (n, text) = ingest_reports(&log, false, "Talos.Ingested");
+        assert_eq!(n, 1, "only the malicious entry by default");
+        assert!(text.contains(&format!("{EICAR_SHA256}  Eicar.Test.File")));
+        // duplicates within input are merged; suspicious included on request.
+        let (n2, _) = ingest_reports(&log, true, "Talos.Ingested");
+        assert_eq!(n2, 2);
     }
 }

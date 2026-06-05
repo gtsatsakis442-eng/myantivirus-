@@ -56,8 +56,26 @@ enum Command {
         #[arg(long)]
         enforce: bool,
     },
+    /// Grow the signature database from scan logs (`scan --json`) — the
+    /// feedback loop that turns confirmed detections into hash signatures.
+    Ingest(IngestArgs),
     /// Self-test: scan an EICAR sample to verify detection works end-to-end.
     Selftest,
+}
+
+#[derive(Args, Debug)]
+struct IngestArgs {
+    /// NDJSON scan logs to ingest (files, or `-` for stdin).
+    inputs: Vec<String>,
+    /// Label for entries that have no detection name.
+    #[arg(long, default_value = "Talos.Ingested")]
+    family: String,
+    /// Also ingest 'suspicious' (heuristic/behavioural) entries, not just malicious.
+    #[arg(long)]
+    include_suspicious: bool,
+    /// Append new signatures to this hashdb (default: the local store).
+    #[arg(long)]
+    into: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -150,6 +168,7 @@ fn main() -> ExitCode {
         Some(Command::Update(args)) => cmd_update(args),
         Some(Command::Lookup { target }) => cmd_lookup(target),
         Some(Command::Watch { paths, enforce }) => cmd_watch(paths, enforce),
+        Some(Command::Ingest(args)) => cmd_ingest(args),
         Some(Command::Selftest) => cmd_selftest(),
     }
 }
@@ -264,6 +283,73 @@ fn cmd_watch_enforce(_targets: &[PathBuf]) -> Result<()> {
         "--enforce (blocking real-time) is only available on Linux via fanotify; \
          on Windows, pre-execution blocking is the Phase-2 kernel minifilter"
     )
+}
+
+fn cmd_ingest(args: IngestArgs) -> ExitCode {
+    let result = (|| -> Result<()> {
+        if args.inputs.is_empty() {
+            anyhow::bail!("provide scan log file(s) from `scan --json`, or `-` for stdin");
+        }
+        let mut text = String::new();
+        for inp in &args.inputs {
+            if inp == "-" {
+                use std::io::Read;
+                std::io::stdin().read_to_string(&mut text)?;
+            } else {
+                text.push_str(&std::fs::read_to_string(inp)?);
+                text.push('\n');
+            }
+        }
+        let (found, hashdb) =
+            scanner_core::signatures::ingest_reports(&text, args.include_suspicious, &args.family);
+        if found == 0 {
+            println!("No malicious entries found in the log(s) to ingest.");
+            return Ok(());
+        }
+        let target = args
+            .into
+            .unwrap_or_else(|| paths::store_dir().join("hashes").join("ingested.hashdb"));
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Append only hashes not already present in the target database.
+        let existing = std::fs::read_to_string(&target).unwrap_or_default();
+        let have: std::collections::HashSet<&str> = existing
+            .lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .collect();
+        let mut buf = String::new();
+        let mut added = 0usize;
+        for line in hashdb.lines() {
+            let h = line.split_whitespace().next().unwrap_or("");
+            if !h.is_empty() && !have.contains(h) {
+                buf.push_str(line);
+                buf.push('\n');
+                added += 1;
+            }
+        }
+        if added > 0 {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&target)?;
+            f.write_all(buf.as_bytes())?;
+        }
+        println!(
+            "Ingested {found} detection hash(es); {added} new signature(s) added to {}.",
+            target.display()
+        );
+        match runner::load_engine(&EngineConfig::default()) {
+            Ok((_, h, y)) => println!("Definitions now: {h} hash signatures, {y} YARA files."),
+            Err(e) => eprintln!("(reload check failed: {e})"),
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
 }
 
 fn cmd_update(args: UpdateArgs) -> ExitCode {

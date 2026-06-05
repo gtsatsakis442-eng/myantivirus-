@@ -116,6 +116,15 @@ Only SHA-256 hash entries are ingested; incompatible YARA rules are skipped
 gracefully. Sources, licenses, and attribution:
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
+**Talos's own, growable database + feedback loop.** Alongside the external
+feeds, Talos ships a first-party curated DB (`signatures/hashes/talos.hashdb`,
+embedded in the binaries). You can grow it from your own scans: export a log
+with `scan --json` and fold the confirmed-malicious hashes in with
+**`talos ingest <log>`** — locally into your store, or upstream (send the log;
+vetted hashes get added to the shipped DB and released to everyone). Only the
+hash + label are taken from a log — no file paths — and only *malicious*
+verdicts by default (a hash signature is exact-match and permanent).
+
 **Desktop GUI** — a dark security console modeled on the patterns that make the
 leading suites (Bitdefender, Malwarebytes, ESET, Kaspersky) approachable:
 
@@ -180,6 +189,8 @@ talos update                       # fetch the latest signatures (abuse.ch + ope
 talos lookup <sha256|file>         # threat-intel lookup (VirusTotal / MalwareBazaar)
 talos watch [folders...]           # real-time: scan + auto-quarantine on access
 talos watch --enforce              # real-time BLOCKING via fanotify (Linux, root)
+talos scan C:\path --json > s.log  # export a scan log …
+talos ingest s.log                 # … then grow the signature DB from it
 talos quarantine list              # review the vault
 talos quarantine restore <id>      # restore a false positive
 ```

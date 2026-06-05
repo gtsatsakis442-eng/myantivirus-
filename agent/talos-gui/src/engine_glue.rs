@@ -30,7 +30,11 @@ fn scan_options(cfg: &TalosConfig) -> ScanOptions {
 }
 
 /// Baseline signatures embedded into the binary (works with no external files).
-pub const HASHDB: &str = include_str!("../../../signatures/hashes/baseline.hashdb");
+pub const HASHDB: &str = concat!(
+    include_str!("../../../signatures/hashes/baseline.hashdb"),
+    "\n",
+    include_str!("../../../signatures/hashes/talos.hashdb"),
+);
 pub const YARA_RULES: &[(&str, &str)] = &[
     (
         "eicar.yar",

@@ -102,6 +102,8 @@ talos update                        # fetch the latest signatures (see §6)
 talos lookup <sha256|file>          # threat-intel lookup (free API; see §9)
 talos watch [folders...]            # real-time: scan + auto-quarantine on access
 talos watch --enforce               # real-time BLOCKING via fanotify (Linux, root)
+talos scan /path --json > scan.log  # export a scan log, then …
+talos ingest scan.log               # … grow the signature DB from it (see §10)
 ```
 
 ### Quarantine management
@@ -264,3 +266,31 @@ talos selftest               # -> SELFTEST PASSED
 | Quarantine `list` is empty after `--quarantine-dir` | pass the same `--dir` to `quarantine list` |
 | Large file shows `content_inspected: false` | it exceeded `--max-size-mib`; it was hash-checked only |
 | Windows "Unknown Publisher" warning | expected until the production EV signature is applied ([docs/04](04-deployment-distribution.md)) |
+
+---
+
+## 10. Growing the signature database (feedback loop)
+
+Talos ships its **own** first-party database (`signatures/hashes/talos.hashdb`,
+embedded in the binaries) on top of the external feeds. You make it better by
+feeding back **scan logs** — and turning the confirmed detections into
+signatures:
+
+```bash
+talos scan C:\Users\me\Downloads --json > scan.log   # export an NDJSON log
+talos ingest scan.log                                # fold its hashes into your DB
+talos ingest scan.log --include-suspicious           # also keep heuristic/behaviour hits
+talos ingest scan.log --into C:\path\custom.hashdb   # write to a specific DB
+```
+
+`ingest` extracts the **SHA-256** of every **malicious** report (only — by
+default), labels it by its detection name, de-duplicates against what you
+already have, and appends to your local store so the engine picks it up on the
+next scan. **Only the hash + label are taken — file paths in the log are
+ignored**, so a shared log leaks no local paths.
+
+**To improve the shipped database for everyone:** send the `scan.log` upstream.
+Confirmed-malicious hashes are vetted and added to `signatures/hashes/talos.hashdb`
+in the repo, then published in the next release. (A hash signature is an
+exact-match fingerprint and permanent, so only *confirmed* malware is added —
+generalising detections are written as YARA rules instead.)
