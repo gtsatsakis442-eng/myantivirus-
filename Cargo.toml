@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "agent/scanner-core",
     "agent/scanner-cli",
+    "agent/talos-ipc",
+    "agent/talos-agent",
     "agent/talos-gui",
 ]
 

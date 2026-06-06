@@ -9,6 +9,7 @@ mod embedded;
 mod interactive;
 mod paths;
 mod runner;
+mod service;
 mod ui;
 
 use std::path::PathBuf;
@@ -69,8 +70,29 @@ enum Command {
         #[command(subcommand)]
         action: FirewallAction,
     },
+    /// Talk to the running agent service (thin client over local IPC).
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
     /// Self-test: scan an EICAR sample to verify detection works end-to-end.
     Selftest,
+}
+
+#[derive(Subcommand, Debug)]
+enum AgentAction {
+    /// Show the agent's live protection status.
+    Status,
+    /// Show the agent's recent activity events.
+    Events,
+    /// Ask the agent to run a background scan (empty paths = Quick Scan).
+    Scan {
+        /// Folders/files to scan.
+        paths: Vec<PathBuf>,
+        /// Quarantine detected threats automatically.
+        #[arg(long)]
+        quarantine: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -194,7 +216,20 @@ fn main() -> ExitCode {
         Some(Command::Ingest(args)) => cmd_ingest(args),
         Some(Command::Guard { paths }) => cmd_guard(paths),
         Some(Command::Firewall { action }) => cmd_firewall(action),
+        Some(Command::Agent { action }) => cmd_agent(action),
         Some(Command::Selftest) => cmd_selftest(),
+    }
+}
+
+fn cmd_agent(action: AgentAction) -> ExitCode {
+    let result = match action {
+        AgentAction::Status => service::status(),
+        AgentAction::Events => service::events(),
+        AgentAction::Scan { paths, quarantine } => service::scan(paths, quarantine),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
     }
 }
 

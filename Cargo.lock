@@ -4038,6 +4038,7 @@ dependencies = [
  "scanner-core",
  "serde",
  "serde_json",
+ "talos-ipc",
  "tempfile",
  "winresource",
 ]
@@ -4459,6 +4460,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-agent"
+version = "0.11.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "scanner-core",
+ "serde_json",
+ "talos-ipc",
+ "tempfile",
+]
+
+[[package]]
 name = "talos-gui"
 version = "0.11.0"
 dependencies = [
@@ -4468,6 +4481,14 @@ dependencies = [
  "serde",
  "serde_json",
  "winresource",
+]
+
+[[package]]
+name = "talos-ipc"
+version = "0.11.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
