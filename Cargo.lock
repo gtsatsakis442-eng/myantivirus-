@@ -4031,20 +4031,21 @@ dependencies = [
 
 [[package]]
 name = "scanner-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "clap",
  "scanner-core",
  "serde",
  "serde_json",
+ "talos-ipc",
  "tempfile",
  "winresource",
 ]
 
 [[package]]
 name = "scanner-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "goblin",
  "hex",
@@ -4459,15 +4460,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-agent"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "scanner-core",
+ "serde_json",
+ "talos-ipc",
+ "tempfile",
+ "windows-service",
+]
+
+[[package]]
 name = "talos-gui"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "eframe",
  "egui",
  "scanner-core",
  "serde",
  "serde_json",
+ "talos-ipc",
  "winresource",
+]
+
+[[package]]
+name = "talos-ipc"
+version = "0.12.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5565,6 +5588,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d1043d8214f791817bab27572aaa8af63732e11bf84aa21a45a78d6c317ae0e"
 dependencies = [
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-service"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "857224b3b211c6f3616921f081ee54721ee3ad2ace2fac6a6337e032f7b4dcf2"
+dependencies = [
+ "bitflags 2.11.1",
+ "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

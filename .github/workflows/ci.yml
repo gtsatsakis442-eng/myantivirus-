@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build apps (release, windows-msvc)
-        run: cargo build --release --locked -p scanner-cli -p talos-gui --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked -p scanner-cli -p talos-agent -p talos-gui --target x86_64-pc-windows-msvc
 
       - name: Build MSI (WiX 5)
         shell: pwsh
@@ -75,6 +75,7 @@ jobs:
         run: |
           ./installer/sign/sign.ps1 -Mode simulate -Path `
             "target/x86_64-pc-windows-msvc/release/talos.exe", `
+            "target/x86_64-pc-windows-msvc/release/talos-agent.exe", `
             "target/x86_64-pc-windows-msvc/release/talos-gui.exe"
 
       - name: Upload installer artifacts
@@ -84,5 +85,6 @@ jobs:
           path: |
             installer/wix/talos-agent.msi
             target/x86_64-pc-windows-msvc/release/talos.exe
+            target/x86_64-pc-windows-msvc/release/talos-agent.exe
             target/x86_64-pc-windows-msvc/release/talos-gui.exe
           if-no-files-found: error

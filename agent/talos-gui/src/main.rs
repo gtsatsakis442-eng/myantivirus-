@@ -8,6 +8,7 @@
 //! **Settings** panel whose toggles genuinely change how scans run.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_link;
 mod config;
 mod engine_glue;
 mod history;
@@ -146,6 +147,12 @@ struct TalosApp {
     realtime_paths: usize,
     realtime_hits: u64,
 
+    /// Live status of the always-on agent service (if installed/running),
+    /// polled over IPC. `None` means no agent is reachable.
+    agent_status: Option<talos_ipc::Status>,
+    agent_rx: Option<Receiver<Option<talos_ipc::Status>>>,
+    agent_polled_at: u64,
+
     intel_query: String,
     intel_source: String,
     intel_lines: Vec<String>,
@@ -189,6 +196,9 @@ impl TalosApp {
             realtime: None,
             realtime_paths: 0,
             realtime_hits: 0,
+            agent_status: None,
+            agent_rx: None,
+            agent_polled_at: 0,
             intel_query: String::new(),
             intel_source: String::new(),
             intel_lines: Vec::new(),
@@ -464,8 +474,28 @@ impl TalosApp {
             }
         }
 
+        // Poll the agent service status on a background thread, at most every 2s.
+        let nowu = now_unix();
+        if self.agent_rx.is_none() && nowu.saturating_sub(self.agent_polled_at) >= 2 {
+            self.agent_polled_at = nowu;
+            self.agent_rx = Some(agent_link::start_poll());
+        }
+        if let Some(rx) = &self.agent_rx {
+            match rx.try_recv() {
+                Ok(status) => {
+                    self.agent_status = status;
+                    self.agent_rx = None;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => self.agent_rx = None,
+            }
+        }
+
         if self.scanning || self.updating || self.realtime.is_some() || self.intel_busy {
             ctx.request_repaint();
+        } else {
+            // Keep the agent-service indicator reasonably fresh while idle.
+            ctx.request_repaint_after(std::time::Duration::from_secs(2));
         }
     }
 }
@@ -631,6 +661,36 @@ impl TalosApp {
 
         ui.add_space(12.0);
 
+        // Always-on agent service status (shown when the service is running).
+        if let Some(a) = &self.agent_status {
+            card(ui, CARD, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("●").color(GREEN).size(22.0));
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("Talos Agent service — ACTIVE")
+                                .color(GREEN)
+                                .size(15.0)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "Always-on protection · real-time {} · firewall {} · {} threat(s) blocked · up {}",
+                                on_off(a.realtime),
+                                on_off(a.firewall),
+                                a.threats_blocked,
+                                fmt_uptime(a.uptime_secs),
+                            ))
+                            .color(DIM)
+                            .size(12.0),
+                        );
+                    });
+                });
+            });
+            ui.add_space(12.0);
+        }
+
         // At-a-glance metrics: an even, responsive row of uniform tiles.
         let definitions = (self.hashes + self.yara).to_string();
         let last_scan = if self.last_scan_unix == 0 {
@@ -776,6 +836,53 @@ impl TalosApp {
         ui.add_space(10.0);
 
         nav_section(ui, "ACTIVE");
+
+        // Always-on agent service (the installed Windows Service / `talos-agent`).
+        match &self.agent_status {
+            Some(a) => {
+                let desc = format!(
+                    "Running as a background service — protects at boot, even when this window is \
+                     closed. Real-time {}, firewall {}, {} threat(s) blocked, up {}.",
+                    on_off(a.realtime),
+                    on_off(a.firewall),
+                    a.threats_blocked,
+                    fmt_uptime(a.uptime_secs),
+                );
+                module_card(ui, "Agent Service (always-on)", &desc, ModuleStatus::Active);
+            }
+            None => {
+                card(ui, CARD, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new("Agent Service (always-on)")
+                                    .color(TEXT)
+                                    .size(15.0)
+                                    .strong(),
+                            );
+                            ui.label(
+                                RichText::new(
+                                    "Not detected. Install the MSI (or run `talos-agent install`) to \
+                                     protect at boot — real-time, ransomware guard and firewall keep \
+                                     running when this app is closed.",
+                                )
+                                .color(DIM)
+                                .size(12.0),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                RichText::new("● NOT INSTALLED")
+                                    .color(AMBER)
+                                    .size(12.0)
+                                    .strong(),
+                            );
+                        });
+                    });
+                });
+                ui.add_space(8.0);
+            }
+        }
 
         // Real-time on-access monitoring (user-mode) — actually starts/stops a
         // folder watcher; not the kernel minifilter (that's Phase 2).
@@ -1605,5 +1712,23 @@ fn time_ago(then: u64) -> String {
         60..=3599 => format!("{} min ago", secs / 60),
         3600..=86_399 => format!("{} h ago", secs / 3600),
         _ => format!("{} d ago", secs / 86_400),
+    }
+}
+
+fn on_off(b: bool) -> &'static str {
+    if b {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+/// Format an uptime in seconds compactly (s / m / h / d).
+fn fmt_uptime(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs}s"),
+        60..=3599 => format!("{}m", secs / 60),
+        3600..=86_399 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
     }
 }

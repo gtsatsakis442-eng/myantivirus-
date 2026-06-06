@@ -12,7 +12,7 @@
   <Package
       Name="Talos EPP Agent"
       Manufacturer="Talos Security"
-      Version="0.1.0"
+      Version="0.12.0"
       UpgradeCode="6B5F9C2E-2D1A-4E3B-9C7A-1F2E3D4C5B6A"
       Scope="perMachine"
       InstallerVersion="500"
@@ -49,14 +49,52 @@
               KeyPath="yes" />
       </Component>
 
+      <!-- The always-on agent service binary, registered as an auto-start
+           LocalSystem Windows Service that hosts real-time protection, the
+           ransomware canary guard, and OS-firewall C2 blocking. The SCM
+           launches it as `talos-agent.exe service-run`. -->
+      <Component Directory="INSTALLFOLDER">
+        <File Id="AgentExe"
+              Source="$(sys.SOURCEFILEDIR)..\..\target\x86_64-pc-windows-msvc\release\talos-agent.exe"
+              KeyPath="yes" />
+        <ServiceInstall Id="TalosAgentService"
+                        Name="TalosAgent"
+                        DisplayName="Talos EPP Agent"
+                        Description="Talos EPP endpoint protection agent — real-time on-access scanning with auto-quarantine, ransomware canary guard, and OS-firewall C2 blocking."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Arguments="service-run"
+                        Account="LocalSystem"
+                        Vital="yes" />
+        <ServiceControl Id="TalosAgentControl"
+                        Name="TalosAgent"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="no" />
+      </Component>
+
+      <Component Directory="INSTALLFOLDER">
+        <File Id="GuiExe"
+              Source="$(sys.SOURCEFILEDIR)..\..\target\x86_64-pc-windows-msvc\release\talos-gui.exe"
+              KeyPath="yes" />
+      </Component>
+
       <Component Directory="SIGHASH">
         <File Source="$(sys.SOURCEFILEDIR)..\..\signatures\hashes\baseline.hashdb" KeyPath="yes" />
+      </Component>
+      <Component Directory="SIGHASH">
+        <File Id="TalosHashdb" Source="$(sys.SOURCEFILEDIR)..\..\signatures\hashes\talos.hashdb" KeyPath="yes" />
       </Component>
       <Component Directory="SIGYARA">
         <File Id="EicarYar" Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\eicar.yar" KeyPath="yes" />
       </Component>
       <Component Directory="SIGYARA">
         <File Id="WebshellsYar" Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\webshells.yar" KeyPath="yes" />
+      </Component>
+      <Component Directory="SIGYARA">
+        <File Id="PowershellYar" Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\powershell.yar" KeyPath="yes" />
       </Component>
 
       <!-- Persist enrollment/config from the silent-install properties so the
@@ -66,16 +104,17 @@
           <RegistryValue Name="TenantToken" Type="string" Value="[TENANT_TOKEN]" KeyPath="yes" />
           <RegistryValue Name="Server" Type="string" Value="[SERVER]" />
           <RegistryValue Name="UpdateRing" Type="string" Value="[UPDATE_RING]" />
-          <RegistryValue Name="Version" Type="string" Value="0.1.0" />
+          <RegistryValue Name="Version" Type="string" Value="0.12.0" />
         </RegistryKey>
       </Component>
     </ComponentGroup>
 
     <!--
-      Phase 2 adds the kernel sensor + a launch-protected Windows service here:
-        <ServiceInstall Name="TalosAgent" Start="auto" Type="ownProcess" .../>
-      registered as anti-malware PPL anchored by the ELAM driver.
-      See docs/01-core-architecture.md and docs/04-deployment-distribution.md.
+      The user-mode TalosAgent service is installed above (ServiceInstall /
+      ServiceControl). Phase 2 hardens it into an anti-malware **PPL**
+      (protected process light) anchored by an **ELAM** driver, and adds the
+      kernel sensor (minifilter / WFP). See docs/01-core-architecture.md and
+      docs/04-deployment-distribution.md.
     -->
   </Package>
 </Wix>
