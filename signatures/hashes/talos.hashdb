@@ -1,0 +1,15 @@
+# Talos EPP — first-party curated signature database (SHA-256).
+#
+# Format:  <sha256>  <Family/Label>
+#
+# This is Talos's own, growing hash-signature database. It is embedded into the
+# binaries alongside baseline.hashdb and is grown from **vetted** feedback:
+#   * locally, by the operator:  `talos scan <path> --json > scan.log`
+#                                `talos ingest scan.log`
+#   * upstream:  send a scan log; confirmed-malicious hashes are folded in here
+#                and shipped to everyone in the next release.
+#
+# Only **confirmed-malicious** samples belong here — a hash signature is an
+# exact-match fingerprint, so a false entry would flag that exact file forever.
+# (Generalising detections — packers, families, behaviours — are better written
+# as YARA rules under signatures/yara/.)

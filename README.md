@@ -116,13 +116,22 @@ Only SHA-256 hash entries are ingested; incompatible YARA rules are skipped
 gracefully. Sources, licenses, and attribution:
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
+**Talos's own, growable database + feedback loop.** Alongside the external
+feeds, Talos ships a first-party curated DB (`signatures/hashes/talos.hashdb`,
+embedded in the binaries). You can grow it from your own scans: export a log
+with `scan --json` and fold the confirmed-malicious hashes in with
+**`talos ingest <log>`** — locally into your store, or upstream (send the log;
+vetted hashes get added to the shipped DB and released to everyone). Only the
+hash + label are taken from a log — no file paths — and only *malicious*
+verdicts by default (a hash signature is exact-match and permanent).
+
 **Desktop GUI** — a dark security console modeled on the patterns that make the
 leading suites (Bitdefender, Malwarebytes, ESET, Kaspersky) approachable:
 
 | Area | What it gives you |
 |---|---|
 | **Dashboard** | protection-status hero + a **Security Advisor** that recommends contextual actions (run a scan, update, review quarantine) computed from real state |
-| **Protection** | module grid with on/off toggles, including a **Real-time Protection** switch that starts *user-mode on-access monitoring* (auto-scans new/changed files). Truly kernel-level modules (pre-execution blocking, web, firewall, ransomware rollback) stay **Roadmap** — labeled, not faked |
+| **Protection** | module grid with on/off toggles, including a **Real-time Protection** switch — on-access **scan + instant auto-quarantine** of new/changed files. On **Linux**, `talos watch --enforce` does true **blocking** on-access via `fanotify` (allow/deny each open & exec, like ClamAV's `clamonacc`). True pre-execution *blocking on Windows* (kernel minifilter + AMSI), web, firewall, ransomware rollback stay **Roadmap** — labeled, not faked |
 | **Scan** | Quick / Full / Custom with live progress and per-detection results |
 | **Quarantine** | isolate, restore, delete |
 | **Activity** | a persisted log of scans, updates, real-time hits and quarantine actions |
@@ -178,7 +187,12 @@ talos scan C:\path --quarantine    # scan + isolate detected threats
 talos scan C:\path --json          # NDJSON telemetry (see docs/07)
 talos update                       # fetch the latest signatures (abuse.ch + open YARA)
 talos lookup <sha256|file>         # threat-intel lookup (VirusTotal / MalwareBazaar)
-talos watch [folders...]           # real-time on-access monitoring (user-mode)
+talos watch [folders...]           # real-time: scan + auto-quarantine on access
+talos watch --enforce              # real-time BLOCKING via fanotify (Linux, root)
+talos scan C:\path --json > s.log  # export a scan log …
+talos ingest s.log                 # … then grow the signature DB from it
+talos guard [folders...]           # ransomware guard: canary decoys + alerts
+talos firewall sync                # drop known C2 IPs via the OS firewall (admin)
 talos quarantine list              # review the vault
 talos quarantine restore <id>      # restore a false positive
 ```

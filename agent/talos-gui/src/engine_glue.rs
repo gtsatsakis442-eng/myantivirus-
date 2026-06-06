@@ -30,7 +30,11 @@ fn scan_options(cfg: &TalosConfig) -> ScanOptions {
 }
 
 /// Baseline signatures embedded into the binary (works with no external files).
-pub const HASHDB: &str = include_str!("../../../signatures/hashes/baseline.hashdb");
+pub const HASHDB: &str = concat!(
+    include_str!("../../../signatures/hashes/baseline.hashdb"),
+    "\n",
+    include_str!("../../../signatures/hashes/talos.hashdb"),
+);
 pub const YARA_RULES: &[(&str, &str)] = &[
     (
         "eicar.yar",
@@ -241,6 +245,8 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
 pub enum RealtimeMsg {
     Started(usize),
     Detection(Box<ScanReport>),
+    /// A ransomware canary was encrypted/deleted — mass-encryption suspected.
+    Ransomware(String),
     Error(String),
 }
 
@@ -289,15 +295,51 @@ pub fn start_realtime(paths: Vec<PathBuf>) -> RealtimeHandle {
                 return;
             }
         };
+        // Ransomware guard: plant canary decoys across the watched folders.
+        let canaries = scanner_core::ransom_guard::deploy(&paths);
         let _ = tx.send(RealtimeMsg::Started(paths.len()));
         while !stop_thread.load(Ordering::Relaxed) {
             match watch.rx.recv_timeout(Duration::from_millis(300)) {
                 Ok(path) => {
+                    // A canary touched? Verify the content actually changed (our
+                    // own deploy-write hashes the same), then alarm on tamper.
+                    if scanner_core::ransom_guard::is_canary(&path) {
+                        if let Some(c) = canaries.iter().find(|c| c.path == path) {
+                            let tampered = std::fs::read(&c.path)
+                                .map(|b| scanner_core::hash_bytes(&b).sha256 != c.sha256)
+                                .unwrap_or(true);
+                            if tampered {
+                                history::record(
+                                    "realtime",
+                                    format!("RANSOMWARE: canary tampered — {}", c.path.display()),
+                                );
+                                let _ =
+                                    tx.send(RealtimeMsg::Ransomware(c.path.display().to_string()));
+                                let _ = scanner_core::ransom_guard::deploy(&paths);
+                                // restore decoys
+                            }
+                        }
+                        continue;
+                    }
                     let report = scanner.scan_file(&path);
-                    if report.is_malicious() || report.is_suspicious() {
+                    if report.is_malicious() {
+                        // Immediate response: isolate the threat the moment it
+                        // lands (the strongest user-mode action short of the
+                        // Phase-2 kernel minifilter's pre-execution block).
+                        let isolated = quarantine_one(&report);
                         history::record(
                             "realtime",
-                            format!("Real-time detection: {}", report.path),
+                            format!(
+                                "Real-time: {} {}",
+                                if isolated { "quarantined" } else { "detected" },
+                                report.path
+                            ),
+                        );
+                        let _ = tx.send(RealtimeMsg::Detection(Box::new(report)));
+                    } else if report.is_suspicious() {
+                        history::record(
+                            "realtime",
+                            format!("Real-time: suspicious {}", report.path),
                         );
                         let _ = tx.send(RealtimeMsg::Detection(Box::new(report)));
                     }
@@ -306,6 +348,7 @@ pub fn start_realtime(paths: Vec<PathBuf>) -> RealtimeHandle {
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
+        scanner_core::ransom_guard::cleanup(&canaries);
     });
     RealtimeHandle { rx, stop }
 }
@@ -318,6 +361,21 @@ pub fn start_intel(sha256: String) -> Receiver<Result<Vec<scanner_core::IntelRep
         let _ = tx.send(r);
     });
     rx
+}
+
+/// Quarantine a single malicious report immediately (real-time response).
+fn quarantine_one(report: &ScanReport) -> bool {
+    if let (Ok(store), Some(h)) = (Quarantine::open(quarantine_dir()), report.hashes.as_ref()) {
+        return store
+            .quarantine_file(
+                Path::new(&report.path),
+                &h.sha256,
+                report.size,
+                report.detections.clone(),
+            )
+            .is_ok();
+    }
+    false
 }
 
 /// Quarantine the malicious reports; returns how many were isolated.

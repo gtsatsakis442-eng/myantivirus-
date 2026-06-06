@@ -46,13 +46,59 @@ enum Command {
         /// A SHA-256 hash, or a path to a file (its SHA-256 is computed).
         target: String,
     },
-    /// Real-time on-access monitoring: auto-scan files as they appear (user-mode).
+    /// Real-time on-access protection: auto-scan files as they appear, or
+    /// (with --enforce) block malicious open/exec in real time.
     Watch {
         /// Folders to watch (default: the Quick-Scan high-risk locations).
         paths: Vec<PathBuf>,
+        /// Enforce: block malicious open/exec in real time via fanotify
+        /// (Linux only, requires root / CAP_SYS_ADMIN).
+        #[arg(long)]
+        enforce: bool,
+    },
+    /// Grow the signature database from scan logs (`scan --json`) — the
+    /// feedback loop that turns confirmed detections into hash signatures.
+    Ingest(IngestArgs),
+    /// Ransomware guard: plant canary files and alert on mass-encryption.
+    Guard {
+        /// Folders to protect (default: the Quick-Scan high-risk locations).
+        paths: Vec<PathBuf>,
+    },
+    /// Firewall control: block known C2 IPs via the OS firewall (needs admin/root).
+    Firewall {
+        #[command(subcommand)]
+        action: FirewallAction,
     },
     /// Self-test: scan an EICAR sample to verify detection works end-to-end.
     Selftest,
+}
+
+#[derive(Subcommand, Debug)]
+enum FirewallAction {
+    /// Fetch the abuse.ch Feodo Tracker C2 IP blocklist and add drop rules.
+    Sync,
+    /// Block a single IPv4 address.
+    Block {
+        /// IPv4 address to block (outbound).
+        ip: String,
+    },
+    /// Remove all Talos-created firewall rules.
+    Flush,
+}
+
+#[derive(Args, Debug)]
+struct IngestArgs {
+    /// NDJSON scan logs to ingest (files, or `-` for stdin).
+    inputs: Vec<String>,
+    /// Label for entries that have no detection name.
+    #[arg(long, default_value = "Talos.Ingested")]
+    family: String,
+    /// Also ingest 'suspicious' (heuristic/behavioural) entries, not just malicious.
+    #[arg(long)]
+    include_suspicious: bool,
+    /// Append new signatures to this hashdb (default: the local store).
+    #[arg(long)]
+    into: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -144,7 +190,10 @@ fn main() -> ExitCode {
         Some(Command::Quarantine { dir, action }) => cmd_quarantine(dir, action),
         Some(Command::Update(args)) => cmd_update(args),
         Some(Command::Lookup { target }) => cmd_lookup(target),
-        Some(Command::Watch { paths }) => cmd_watch(paths),
+        Some(Command::Watch { paths, enforce }) => cmd_watch(paths, enforce),
+        Some(Command::Ingest(args)) => cmd_ingest(args),
+        Some(Command::Guard { paths }) => cmd_guard(paths),
+        Some(Command::Firewall { action }) => cmd_firewall(action),
         Some(Command::Selftest) => cmd_selftest(),
     }
 }
@@ -182,13 +231,16 @@ fn cmd_lookup(target: String) -> ExitCode {
     }
 }
 
-fn cmd_watch(paths: Vec<PathBuf>) -> ExitCode {
+fn cmd_watch(paths: Vec<PathBuf>, enforce: bool) -> ExitCode {
     let targets = if paths.is_empty() {
         paths::quick_scan_paths()
     } else {
         paths
     };
     let result = (|| -> Result<()> {
+        if enforce {
+            return cmd_watch_enforce(&targets);
+        }
         let (engine, _, _) = runner::load_engine(&EngineConfig::default())?;
         let scanner = scanner_core::Scanner::new(&engine);
         let watch = scanner_core::realtime::watch(&targets)?;
@@ -196,7 +248,10 @@ fn cmd_watch(paths: Vec<PathBuf>) -> ExitCode {
             "Real-time monitoring {} folder(s) — auto-scanning new/changed files. Ctrl-C to stop.",
             targets.len()
         );
-        eprintln!("(user-mode on-access; kernel minifilter is Phase 2)");
+        eprintln!(
+            "(user-mode on-access detection; use --enforce to BLOCK on Linux, \
+             or the Phase-2 minifilter on Windows)"
+        );
         for path in watch.rx.iter() {
             let report = scanner.scan_file(&path);
             if report.is_malicious() || report.is_suspicious() {
@@ -212,6 +267,171 @@ fn cmd_watch(paths: Vec<PathBuf>) -> ExitCode {
                     names.join(", ")
                 );
             }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
+}
+
+/// Blocking real-time enforcement via fanotify (Linux only).
+#[cfg(target_os = "linux")]
+fn cmd_watch_enforce(targets: &[PathBuf]) -> Result<()> {
+    use scanner_core::realtime::{enforce, EnforceEvent};
+    use std::sync::atomic::AtomicBool;
+
+    let (mut engine, _, _) = runner::load_engine(&EngineConfig::default())?;
+    // Enforcement only denies on high-confidence hash/YARA hits, so skip the
+    // slower suspicion layers in the hot path.
+    engine.set_heuristics(false);
+    engine.set_behavior(false);
+    let stop = AtomicBool::new(false);
+    eprintln!(
+        "Real-time ENFORCING — malicious open/exec under {} location(s) will be BLOCKED. Ctrl-C to stop.",
+        targets.len()
+    );
+    enforce(&engine, targets, 128 * 1024 * 1024, &stop, |ev| match ev {
+        EnforceEvent::Ready(n) => eprintln!("fanotify active on {n} mount(s)."),
+        EnforceEvent::Blocked(b) => {
+            let names: Vec<&str> = b.detections.iter().map(|d| d.name.as_str()).collect();
+            println!("[BLOCKED] {}  [{}]", b.path, names.join(", "));
+        }
+    })?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn cmd_watch_enforce(_targets: &[PathBuf]) -> Result<()> {
+    anyhow::bail!(
+        "--enforce (blocking real-time) is only available on Linux via fanotify; \
+         on Windows, pre-execution blocking is the Phase-2 kernel minifilter"
+    )
+}
+
+fn cmd_guard(paths: Vec<PathBuf>) -> ExitCode {
+    let targets = if paths.is_empty() {
+        paths::quick_scan_paths()
+    } else {
+        paths
+    };
+    let result = (|| -> Result<()> {
+        let canaries = scanner_core::ransom_guard::deploy(&targets);
+        if canaries.is_empty() {
+            anyhow::bail!("no writable folders to protect");
+        }
+        eprintln!(
+            "Ransomware guard: {} canary file(s) planted across {} folder(s). Ctrl-C to stop.",
+            canaries.len(),
+            targets.len()
+        );
+        eprintln!("(detection + alert; kernel behavioural rollback with VSS is Phase 2)");
+        loop {
+            let tampered = scanner_core::ransom_guard::check(&canaries);
+            if !tampered.is_empty() {
+                println!("[RANSOMWARE] canary tampered — possible mass-encryption in progress:");
+                for p in &tampered {
+                    println!("  {}", p.display());
+                }
+                // Restore the decoys and keep watching.
+                let _ = scanner_core::ransom_guard::deploy(&targets);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
+}
+
+fn cmd_firewall(action: FirewallAction) -> ExitCode {
+    use scanner_core::firewall;
+    let result = (|| -> Result<()> {
+        match action {
+            FirewallAction::Sync => {
+                eprintln!("Syncing C2 blocklist into the OS firewall (needs Administrator/root)…");
+                let report = firewall::sync_c2_blocklist(firewall::default_feodo_url())?;
+                for m in &report.messages {
+                    println!("  {m}");
+                }
+            }
+            FirewallAction::Block { ip } => {
+                firewall::block_ip(&ip)?;
+                println!("blocked outbound traffic to {ip}");
+            }
+            FirewallAction::Flush => {
+                firewall::flush()?;
+                println!("removed Talos firewall rules");
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
+}
+
+fn cmd_ingest(args: IngestArgs) -> ExitCode {
+    let result = (|| -> Result<()> {
+        if args.inputs.is_empty() {
+            anyhow::bail!("provide scan log file(s) from `scan --json`, or `-` for stdin");
+        }
+        let mut text = String::new();
+        for inp in &args.inputs {
+            if inp == "-" {
+                use std::io::Read;
+                std::io::stdin().read_to_string(&mut text)?;
+            } else {
+                text.push_str(&std::fs::read_to_string(inp)?);
+                text.push('\n');
+            }
+        }
+        let (found, hashdb) =
+            scanner_core::signatures::ingest_reports(&text, args.include_suspicious, &args.family);
+        if found == 0 {
+            println!("No malicious entries found in the log(s) to ingest.");
+            return Ok(());
+        }
+        let target = args
+            .into
+            .unwrap_or_else(|| paths::store_dir().join("hashes").join("ingested.hashdb"));
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Append only hashes not already present in the target database.
+        let existing = std::fs::read_to_string(&target).unwrap_or_default();
+        let have: std::collections::HashSet<&str> = existing
+            .lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .collect();
+        let mut buf = String::new();
+        let mut added = 0usize;
+        for line in hashdb.lines() {
+            let h = line.split_whitespace().next().unwrap_or("");
+            if !h.is_empty() && !have.contains(h) {
+                buf.push_str(line);
+                buf.push('\n');
+                added += 1;
+            }
+        }
+        if added > 0 {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&target)?;
+            f.write_all(buf.as_bytes())?;
+        }
+        println!(
+            "Ingested {found} detection hash(es); {added} new signature(s) added to {}.",
+            target.display()
+        );
+        match runner::load_engine(&EngineConfig::default()) {
+            Ok((_, h, y)) => println!("Definitions now: {h} hash signatures, {y} YARA files."),
+            Err(e) => eprintln!("(reload check failed: {e})"),
         }
         Ok(())
     })();

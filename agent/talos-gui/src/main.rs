@@ -423,6 +423,12 @@ impl TalosApp {
                     }
                     self.activity_loaded = false;
                 }
+                engine_glue::RealtimeMsg::Ransomware(path) => {
+                    self.realtime_hits += 1;
+                    self.status =
+                        format!("⚠ RANSOMWARE suspected — canary encrypted/deleted: {path}");
+                    self.activity_loaded = false;
+                }
                 engine_glue::RealtimeMsg::Error(e) => {
                     self.status = format!("Real-time error: {e}");
                     self.realtime = None;
@@ -776,11 +782,12 @@ impl TalosApp {
         let mut rt_on = self.realtime.is_some();
         let rt_desc = if self.realtime.is_some() {
             format!(
-                "On-access watch ACTIVE — {} folder(s), {} hit(s). Kernel minifilter = Phase 2.",
+                "ACTIVE — on-access scan + auto-quarantine · {} folder(s) · {} hit(s)",
                 self.realtime_paths, self.realtime_hits
             )
         } else {
-            "Auto-scan new/changed files in Downloads, Temp, … (kernel minifilter = Phase 2)."
+            "On-access scan + instant auto-quarantine of new/changed files. Pre-execution \
+             blocking = Phase-2 minifilter (Windows) or `talos watch --enforce` (Linux/fanotify)."
                 .to_string()
         };
         if module_toggle(ui, "Real-time Protection", &rt_desc, &mut rt_on) {
@@ -848,22 +855,40 @@ impl TalosApp {
             "abuse.ch malware hashes + open YARA feeds, on demand.",
             ModuleStatus::Active,
         );
+        module_card(
+            ui,
+            "Ransomware Guard",
+            "Canary decoys detect mass-encryption in real time (active with Real-time).",
+            ModuleStatus::Active,
+        );
+        module_card(
+            ui,
+            "Pre-execution Blocking",
+            "Blocks malicious open/exec on Linux via fanotify (`talos watch --enforce`). \
+             Windows kernel minifilter = Phase 2.",
+            ModuleStatus::Active,
+        );
+        module_card(
+            ui,
+            "Firewall (C2 blocking)",
+            "Drops known C2 IPs via the OS firewall, netsh/iptables (`talos firewall sync`).",
+            ModuleStatus::Active,
+        );
 
         ui.add_space(12.0);
         nav_section(ui, "ROADMAP · PHASE 2 (KERNEL SENSOR)");
         for (name, desc) in [
             (
-                "Pre-execution Blocking",
-                "Kernel minifilter that blocks malicious file I/O before it runs.",
+                "Pre-execution Blocking (Windows)",
+                "Kernel file-system minifilter + AMSI to block before run.",
             ),
             (
                 "Web Protection",
                 "Block malicious URLs and phishing in the browser.",
             ),
-            ("Firewall", "Application-aware network filtering (WFP)."),
             (
-                "Ransomware Remediation",
-                "Behavioral rollback of unauthorized encryption.",
+                "Ransomware Rollback",
+                "Kernel I/O filter + Volume Shadow Copy to restore encrypted files.",
             ),
             (
                 "Banking & Payment",
@@ -1374,7 +1399,7 @@ impl TalosApp {
             );
             ui.label(RichText::new("• ZIP archive inspection (zip-bomb-guarded)").color(DIM));
             ui.label(
-                RichText::new("• Real-time on-access monitoring (user-mode folder watch)")
+                RichText::new("• Real-time on-access protection (scan + auto-quarantine; fanotify blocking on Linux)")
                     .color(DIM),
             );
             ui.label(
