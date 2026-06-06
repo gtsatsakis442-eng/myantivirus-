@@ -19,5 +19,9 @@ clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 
+# Windows Service control handler + install/uninstall (SCM integration).
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+
 [dev-dependencies]
 tempfile = "3"

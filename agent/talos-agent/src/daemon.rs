@@ -4,6 +4,7 @@
 //! On Windows this same body is what the (forthcoming) service control handler
 //! runs; today it is launched directly with `talos-agent run`.
 
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
 use std::thread;
@@ -17,9 +18,10 @@ use talos_ipc::{EndpointInfo, Envelope, Response};
 
 use crate::core::Shared;
 
-/// Build state, start the worker threads, and run the IPC accept loop until a
-/// `Shutdown` request arrives (or the process is terminated).
-pub fn run() -> Result<()> {
+/// Build state, start the worker threads, and run the IPC accept loop until the
+/// shared `stop` flag is set — by a `Shutdown` IPC request, the Windows Service
+/// control handler, or process termination.
+pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
     let (engine, hash_count, yara_files, _skipped) = scanner_core::bootstrap::load_engine(
         crate::embedded::HASHDB,
         crate::embedded::YARA_RULES,
@@ -46,6 +48,7 @@ pub fn run() -> Result<()> {
         token,
         hash_count,
         yara_files,
+        stop,
     ));
 
     eprintln!(
@@ -65,28 +68,33 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// IPC accept loop: one authenticated request/response per connection.
+/// IPC accept loop: one authenticated request/response per connection. Uses a
+/// non-blocking listener so it exits promptly once `shutdown` is set (a blocking
+/// `accept` would otherwise hang past a Service stop).
 fn serve(listener: &std::net::TcpListener, shared: &Arc<Shared>) {
-    for stream in listener.incoming() {
-        let mut stream = match stream {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let envelope: Envelope = match read_msg(&mut stream) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let response = if envelope.token != shared.token() {
-            Response::Error {
-                message: "unauthorized".to_string(),
+    let _ = listener.set_nonblocking(true);
+    while !shared.shutdown_requested() {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let envelope: Envelope = match read_msg(&mut stream) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                let response = if envelope.token != shared.token() {
+                    Response::Error {
+                        message: "unauthorized".to_string(),
+                    }
+                } else {
+                    shared.handle(envelope.request)
+                };
+                let _ = write_msg(&mut stream, &response);
             }
-        } else {
-            shared.handle(envelope.request)
-        };
-        let _ = write_msg(&mut stream, &response);
-        if shared.shutdown_requested() {
-            break;
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(_) => thread::sleep(Duration::from_millis(100)),
         }
     }
 }

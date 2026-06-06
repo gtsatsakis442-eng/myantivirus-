@@ -76,7 +76,7 @@ pub struct Shared {
     started: Instant,
     realtime_on: AtomicBool,
     firewall_on: AtomicBool,
-    shutdown: AtomicBool,
+    shutdown: Arc<AtomicBool>,
     scan_seq: AtomicU64,
     hash_count: usize,
     yara_files: usize,
@@ -93,6 +93,7 @@ impl Shared {
         token: String,
         hash_count: usize,
         yara_files: usize,
+        shutdown: Arc<AtomicBool>,
     ) -> Self {
         Self {
             engine,
@@ -102,7 +103,7 @@ impl Shared {
             started: Instant::now(),
             realtime_on: AtomicBool::new(true),
             firewall_on: AtomicBool::new(false),
-            shutdown: AtomicBool::new(false),
+            shutdown,
             scan_seq: AtomicU64::new(0),
             hash_count,
             yara_files,
@@ -476,6 +477,7 @@ mod tests {
             "test-token".to_string(),
             1,
             3,
+            Arc::new(AtomicBool::new(false)),
         ))
     }
 
