@@ -7,12 +7,12 @@ established products use (e.g. Bitdefender's `vsserv`/`bdagent` service with a
 separate UI), and it's what makes real-time protection robust — it runs at boot,
 survives user logoff, and isn't tied to a window being open.
 
-> **Status.** This document describes the **foundation that is implemented and
-> tested today**: the agent process, the IPC protocol, and the CLI client. The
-> items in *Roadmap* below (Windows Service control handler, GUI thin-client,
-> MSI service registration, named-pipe hardening) are the next, separately
-> validated step. Nothing here is faked — the agent runs and protects today via
-> `talos-agent run`.
+> **Status.** Implemented and CI-validated today (Linux + Windows): the agent
+> process, the IPC protocol, the CLI client, the **Windows Service** control
+> handler, and **MSI service registration**. The MSI installs `talos-agent.exe`
+> and registers it as an auto-start LocalSystem service. The remaining *Roadmap*
+> items (GUI thin-client, named-pipe transport hardening, the kernel tier) are
+> the next steps. Nothing here is faked.
 
 ## Components
 
@@ -54,35 +54,40 @@ Response → Pong | Status{…} | ScanStarted{scan_id} | Quarantine{items}
 `GetEvents{since}` is a cursor poll over the agent's rolling activity log, so a
 client (status bar, dashboard) can stream new events without missing any.
 
-## Using it today
+## Using it
 
 ```sh
-# Start the agent in the foreground (engine + real-time + ransomware guard + IPC).
+# Windows: install as an auto-start LocalSystem service (the MSI does this too).
+talos-agent install
+talos-agent uninstall
+
+# Run in the foreground (any OS; engine + real-time + ransomware guard + IPC).
 talos-agent run
 
-# From another shell — query the running service:
+# Query / drive the running service from any client:
 talos-agent status            # or: talos agent status
 talos-agent events            # or: talos agent events
 talos agent scan ~/Downloads --quarantine
 ```
+
+On Windows the MSI registers the **`TalosAgent`** service (auto-start,
+LocalSystem), which the Service Control Manager launches as
+`talos-agent.exe service-run`; a `Stop` cleanly trips the shared stop flag so
+the IPC loop and worker threads wind down.
 
 The agent watches the Quick-Scan high-risk locations, **auto-quarantines** a
 malicious file the moment it lands, and raises a **ransomware alarm** if a
 planted canary is tampered with — all recorded in the activity log that
 `… events` prints and the GUI dashboard will show.
 
-## Roadmap (next, validated step)
+## Roadmap
 
-- **Windows Service** — a Service Control Handler so `talos-agent` registers
-  with the SCM, reports `RUNNING`, and starts at boot under LocalSystem
-  (`windows-service` crate). `install` / `uninstall` management verbs.
-- **MSI service registration** — `ServiceInstall` / `ServiceControl` in the WiX
-  package so the installer provisions the agent as an auto-start service, and
-  ships `talos-agent.exe`.
 - **GUI thin-client** — the dashboard connects to the agent for live status and
   control, falling back to its embedded engine when no service is present.
 - **Transport hardening** — named pipe (Windows) / Unix socket (Linux) with a
   SYSTEM/Administrators-only ACL in place of loopback TCP.
+- **Service self-protection** — anti-malware **PPL** anchored by an **ELAM**
+  driver so the service can't be killed by a standard admin.
 - **Kernel tier (Phase 2, per docs/01)** — file-system minifilter, WFP network
   filter, and VSS-backed ransomware rollback remain the kernel-driver effort.
 

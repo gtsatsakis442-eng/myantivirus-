@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build apps (release, windows-msvc)
-        run: cargo build --release --locked -p scanner-cli -p talos-gui --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked -p scanner-cli -p talos-agent -p talos-gui --target x86_64-pc-windows-msvc
 
       - name: Build MSI (WiX 5)
         shell: pwsh
@@ -41,6 +41,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/x86_64-pc-windows-msvc/release/talos-gui.exe dist/talos-gui.exe
           Copy-Item target/x86_64-pc-windows-msvc/release/talos.exe dist/talos.exe
+          Copy-Item target/x86_64-pc-windows-msvc/release/talos-agent.exe dist/talos-agent.exe
           Copy-Item installer/wix/talos-agent.msi dist/talos-agent.msi
           # Production signing (EV cert in an HSM) would run here on the hardened
           # signing host: ./installer/sign/sign.ps1 -Mode production -Path dist/*
@@ -72,19 +73,23 @@ jobs:
           files: |
             dist/talos-gui.exe
             dist/talos.exe
+            dist/talos-agent.exe
             dist/talos-agent.msi
           body: |
             **Talos EPP v${{ steps.ver.outputs.version }}** — Windows build.
 
             - **`talos-gui.exe`** — the desktop **GUI app** (double-click it).
-            - **`talos.exe`** — the console/CLI agent (`talos selftest`, `talos update`).
-            - **`talos-agent.msi`** — the enterprise installer (GPO / Intune / SCCM).
+            - **`talos.exe`** — the console/CLI scanner (`talos selftest`, `talos update`, `talos agent …`).
+            - **`talos-agent.exe`** — the **always-on agent service** (`talos-agent install` registers it as an auto-start Windows Service).
+            - **`talos-agent.msi`** — the enterprise installer (GPO / Intune / SCCM) — installs the app **and registers the agent service**.
 
-            **Highlights:** multi-source signature updater (abuse.ch hashes + open
-            YARA + optional ClamAV), reduced heuristic false positives (Authenticode
-            trust + two-signal rule), and a redesigned GUI (Security Advisor,
-            Protection grid, Activity log, real Settings with exclusions). Both exes
-            are self-contained — signatures are embedded.
+            **What's in this line:** an always-on **agent service** (real-time
+            on-access scanning with auto-quarantine, ransomware **canary guard**,
+            and OS-firewall **C2 blocking**) that the GUI/CLI drive over local IPC;
+            a first-party signature DB with the `talos ingest` feedback loop;
+            multi-source updater (abuse.ch + open YARA + optional ClamAV); and
+            reduced heuristic false positives (Authenticode trust + two-signal
+            rule). Binaries are self-contained — signatures are embedded.
 
             > Unsigned build — Windows SmartScreen shows an "Unknown Publisher"
             > prompt (*More info → Run anyway*) until the EV certificate is applied
@@ -100,17 +105,18 @@ jobs:
           files: |
             dist/talos-gui.exe
             dist/talos.exe
+            dist/talos-agent.exe
             dist/talos-agent.msi
           body: |
             **Rolling pre-release built from `main` (v${{ steps.ver.outputs.version }}).**
 
             - **`talos-gui.exe`** — the desktop **GUI app** (double-click it).
-            - **`talos.exe`** — the console/CLI agent (automation, `talos selftest`).
-            - **`talos-agent.msi`** — the enterprise installer (GPO/Intune/SCCM).
+            - **`talos.exe`** — the console/CLI scanner (`talos agent …`, `talos selftest`).
+            - **`talos-agent.exe`** — the always-on **agent service** (`talos-agent install`).
+            - **`talos-agent.msi`** — the enterprise installer (GPO/Intune/SCCM); registers the agent service.
 
-            Both exes are self-contained (signatures embedded); no extra files
-            needed. For a pinned version, see the **v${{ steps.ver.outputs.version }}**
-            release.
+            Binaries are self-contained (signatures embedded). For a pinned
+            version, see the **v${{ steps.ver.outputs.version }}** release.
 
             > Not production-signed yet — Windows SmartScreen will show an
             > "Unknown Publisher" prompt (click *More info → Run anyway*) until
