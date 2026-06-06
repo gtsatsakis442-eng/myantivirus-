@@ -4481,6 +4481,7 @@ dependencies = [
  "scanner-core",
  "serde",
  "serde_json",
+ "talos-ipc",
  "winresource",
 ]
 

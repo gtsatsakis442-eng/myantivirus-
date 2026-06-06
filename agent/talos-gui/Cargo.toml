@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 scanner-core = { path = "../scanner-core" }
+talos-ipc = { path = "../talos-ipc" }
 eframe = "0.29"
 egui = "0.29"
 serde = { version = "1", features = ["derive"] }
