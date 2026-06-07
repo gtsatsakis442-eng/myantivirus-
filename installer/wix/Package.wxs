@@ -12,7 +12,7 @@
   <Package
       Name="Talos EPP Agent"
       Manufacturer="Talos Security"
-      Version="0.12.0"
+      Version="0.13.0"
       UpgradeCode="6B5F9C2E-2D1A-4E3B-9C7A-1F2E3D4C5B6A"
       Scope="perMachine"
       InstallerVersion="500"
@@ -104,7 +104,7 @@
           <RegistryValue Name="TenantToken" Type="string" Value="[TENANT_TOKEN]" KeyPath="yes" />
           <RegistryValue Name="Server" Type="string" Value="[SERVER]" />
           <RegistryValue Name="UpdateRing" Type="string" Value="[UPDATE_RING]" />
-          <RegistryValue Name="Version" Type="string" Value="0.12.0" />
+          <RegistryValue Name="Version" Type="string" Value="0.13.0" />
         </RegistryKey>
       </Component>
     </ComponentGroup>

@@ -5,9 +5,11 @@ use std::io::{self, Read, Write};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-/// Upper bound on a single framed message (16 MiB) — a guard against a corrupt
-/// or hostile length prefix.
-pub const MAX_MSG_BYTES: usize = 16 * 1024 * 1024;
+/// Upper bound on a single framed message (4 MiB) — a guard against a corrupt
+/// or hostile length prefix. The protocol's messages are small (status, event
+/// pages, quarantine lists), so this is generous while capping the memory a bad
+/// length prefix can force us to allocate.
+pub const MAX_MSG_BYTES: usize = 4 * 1024 * 1024;
 
 /// Serialize `msg` to JSON and write it as a 4-byte big-endian length followed
 /// by the payload, then flush.

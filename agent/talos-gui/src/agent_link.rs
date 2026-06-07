@@ -49,3 +49,13 @@ pub fn start_poll() -> Receiver<Option<Status>> {
     });
     rx
 }
+
+/// Fire-and-forget: ask the running agent to turn its real-time monitor on or
+/// off. The next status poll reflects the change.
+pub fn set_realtime(on: bool) {
+    std::thread::spawn(move || {
+        if let Some(endpoint) = read_endpoint() {
+            let _ = talos_ipc::client::call(&endpoint, Request::SetRealtime { on });
+        }
+    });
+}

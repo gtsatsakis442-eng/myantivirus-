@@ -9,10 +9,15 @@ survives user logoff, and isn't tied to a window being open.
 
 > **Status.** Implemented and CI-validated today (Linux + Windows): the agent
 > process, the IPC protocol, the CLI client, the **Windows Service** control
-> handler, and **MSI service registration**. The MSI installs `talos-agent.exe`
-> and registers it as an auto-start LocalSystem service. The remaining *Roadmap*
-> items (GUI thin-client, named-pipe transport hardening, the kernel tier) are
-> the next steps. Nothing here is faked.
+> handler, **MSI service registration**, and the **GUI thin-client** (live
+> service status plus real-time control — when the agent is running the GUI's
+> Real-time toggle drives the *service* over IPC instead of double-watching).
+> The remaining *Roadmap* items (named-pipe transport hardening, the kernel
+> tier) are the next steps. Nothing here is faked.
+>
+> **IPC hardening:** the token check is **constant-time**; framed messages are
+> capped at **4 MiB**; and the agent runs **at most one client-initiated scan at
+> a time** so a local client can't exhaust resources by spamming requests.
 
 ## Components
 
@@ -82,8 +87,8 @@ planted canary is tampered with — all recorded in the activity log that
 
 ## Roadmap
 
-- **GUI thin-client** — the dashboard connects to the agent for live status and
-  control, falling back to its embedded engine when no service is present.
+- **GUI event streaming** — surface the agent's live activity log in the GUI's
+  Activity view (status + real-time control already route through the agent).
 - **Transport hardening** — named pipe (Windows) / Unix socket (Linux) with a
   SYSTEM/Administrators-only ACL in place of loopback TCP.
 - **Service self-protection** — anti-malware **PPL** anchored by an **ELAM**

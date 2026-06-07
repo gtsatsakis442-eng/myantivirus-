@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use scanner_core::{
     Engine, Quarantine, ScanOptions, ScanReport, ScanSummary, Scanner, DEFAULT_MAX_CONTENT_BYTES,
@@ -77,11 +77,16 @@ pub struct Shared {
     realtime_on: AtomicBool,
     firewall_on: AtomicBool,
     shutdown: Arc<AtomicBool>,
+    /// True while an agent-initiated scan is running (anti-abuse: one at a time).
+    scanning: AtomicBool,
     scan_seq: AtomicU64,
     hash_count: usize,
     yara_files: usize,
     stats: Mutex<Stats>,
     events: Mutex<EventLog>,
+    /// Short-lived cache of the quarantine item count, so a status poll every
+    /// couple of seconds doesn't re-list the vault each time.
+    quarantine_cache: Mutex<Option<(Instant, usize)>>,
 }
 
 impl Shared {
@@ -104,11 +109,13 @@ impl Shared {
             realtime_on: AtomicBool::new(true),
             firewall_on: AtomicBool::new(false),
             shutdown,
+            scanning: AtomicBool::new(false),
             scan_seq: AtomicU64::new(0),
             hash_count,
             yara_files,
             stats: Mutex::new(Stats::default()),
             events: Mutex::new(EventLog::new()),
+            quarantine_cache: Mutex::new(None),
         }
     }
 
@@ -235,10 +242,29 @@ impl Shared {
         }
     }
 
+    /// Quarantine item count with a short TTL cache (status is polled often).
+    fn quarantined_count(&self) -> usize {
+        const TTL: Duration = Duration::from_secs(3);
+        let fresh = || {
+            Quarantine::open(&self.quarantine_dir)
+                .and_then(|q| q.list())
+                .map_or(0, |items| items.len())
+        };
+        let Ok(mut cache) = self.quarantine_cache.lock() else {
+            return fresh();
+        };
+        if let Some((at, n)) = *cache {
+            if at.elapsed() < TTL {
+                return n;
+            }
+        }
+        let n = fresh();
+        *cache = Some((Instant::now(), n));
+        n
+    }
+
     fn status(&self) -> Status {
-        let quarantined = Quarantine::open(&self.quarantine_dir)
-            .and_then(|q| q.list())
-            .map_or(0, |items| items.len());
+        let quarantined = self.quarantined_count();
         let stats = self.stats.lock().ok();
         let (last_scan_unix, last_files, last_malicious, last_suspicious, threats_blocked) = stats
             .as_ref()
@@ -305,6 +331,20 @@ impl Shared {
     }
 
     fn spawn_scan(self: &Arc<Self>, paths: Vec<String>, quarantine: bool) -> u64 {
+        // Anti-abuse: only one agent-initiated scan at a time, so a local client
+        // can't spawn unbounded scan threads by spamming StartScan.
+        if self
+            .scanning
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            self.push_event(
+                severity::INFO,
+                "scan request ignored — a scan is already running".to_string(),
+                None,
+            );
+            return self.scan_seq.load(Ordering::Relaxed);
+        }
         let scan_id = self.scan_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let me = Arc::clone(self);
         std::thread::spawn(move || me.run_scan(paths, quarantine, scan_id));
@@ -312,6 +352,8 @@ impl Shared {
     }
 
     fn run_scan(self: Arc<Self>, paths: Vec<String>, quarantine: bool, scan_id: u64) {
+        // Clear the `scanning` flag whenever this returns (including on panic).
+        let _scan_guard = ScanResetGuard(&self.scanning);
         let targets: Vec<PathBuf> = if paths.is_empty() {
             crate::paths::quick_scan_paths()
         } else {
@@ -460,6 +502,16 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Clears the `scanning` flag on drop, so a scan thread always releases it even
+/// if it panics.
+struct ScanResetGuard<'a>(&'a AtomicBool);
+
+impl Drop for ScanResetGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 #[cfg(test)]

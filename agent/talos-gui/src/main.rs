@@ -76,8 +76,12 @@ fn install_theme(ctx: &egui::Context) {
     ctx.set_visuals(v);
 
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
-    style.spacing.button_padding = egui::vec2(12.0, 8.0);
+    // Tighter horizontal gap so an inline icon/dot hugs its label; a snug
+    // vertical gap so a title and its description group together (explicit
+    // add_space() calls still separate sections). Roomier buttons read cleaner.
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding = egui::vec2(14.0, 9.0);
+    style.spacing.interact_size.y = 26.0;
     ctx.set_style(style);
 }
 
@@ -485,6 +489,11 @@ impl TalosApp {
                 Ok(status) => {
                     self.agent_status = status;
                     self.agent_rx = None;
+                    // The agent owns real-time when present; stop any in-process
+                    // watcher so files aren't scanned/quarantined twice.
+                    if self.agent_status.is_some() && self.realtime.is_some() {
+                        self.stop_realtime();
+                    }
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => self.agent_rx = None,
@@ -884,24 +893,41 @@ impl TalosApp {
             }
         }
 
-        // Real-time on-access monitoring (user-mode) — actually starts/stops a
-        // folder watcher; not the kernel minifilter (that's Phase 2).
-        let mut rt_on = self.realtime.is_some();
-        let rt_desc = if self.realtime.is_some() {
-            format!(
-                "ACTIVE — on-access scan + auto-quarantine · {} folder(s) · {} hit(s)",
-                self.realtime_paths, self.realtime_hits
-            )
+        // Real-time on-access monitoring. When the agent service is running it
+        // owns real-time, so the toggle drives the service over IPC (no
+        // double-watching); otherwise the GUI runs its own in-process watcher.
+        let agent_realtime = self.agent_status.as_ref().map(|a| a.realtime);
+        if let Some(on_now) = agent_realtime {
+            let mut on = on_now;
+            let desc = "Handled by the always-on agent service — on-access scan + \
+                        auto-quarantine across the high-risk folders. Toggling controls the \
+                        service (it keeps protecting even when this window is closed)."
+                .to_string();
+            if module_toggle(ui, "Real-time Protection", &desc, &mut on) {
+                agent_link::set_realtime(on);
+                self.status = format!(
+                    "Real-time {} via the agent service.",
+                    if on { "enabled" } else { "disabled" }
+                );
+            }
         } else {
-            "On-access scan + instant auto-quarantine of new/changed files. Pre-execution \
-             blocking = Phase-2 minifilter (Windows) or `talos watch --enforce` (Linux/fanotify)."
-                .to_string()
-        };
-        if module_toggle(ui, "Real-time Protection", &rt_desc, &mut rt_on) {
-            if rt_on {
-                self.start_realtime();
+            let mut rt_on = self.realtime.is_some();
+            let rt_desc = if self.realtime.is_some() {
+                format!(
+                    "ACTIVE — on-access scan + auto-quarantine · {} folder(s) · {} hit(s)",
+                    self.realtime_paths, self.realtime_hits
+                )
             } else {
-                self.stop_realtime();
+                "On-access scan + instant auto-quarantine of new/changed files. Pre-execution \
+                 blocking = Phase-2 minifilter (Windows) or `talos watch --enforce` (Linux/fanotify)."
+                    .to_string()
+            };
+            if module_toggle(ui, "Real-time Protection", &rt_desc, &mut rt_on) {
+                if rt_on {
+                    self.start_realtime();
+                } else {
+                    self.stop_realtime();
+                }
             }
         }
 
