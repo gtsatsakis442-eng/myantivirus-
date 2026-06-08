@@ -73,6 +73,38 @@ pub fn scan(paths: Vec<PathBuf>, quarantine: bool) -> Result<()> {
     }
 }
 
+/// `talos agent firewall sync|flush|block <ip>` — manage OS-firewall rules via
+/// the privileged agent service.
+pub fn firewall_sync() -> Result<()> {
+    match call(Request::SetFirewall { on: true })? {
+        Response::Ack => {
+            println!("requested C2 blocklist sync; follow `talos agent events`");
+            Ok(())
+        }
+        other => unexpected(other),
+    }
+}
+
+pub fn firewall_flush() -> Result<()> {
+    match call(Request::SetFirewall { on: false })? {
+        Response::Ack => {
+            println!("requested removal of all Talos firewall rules");
+            Ok(())
+        }
+        other => unexpected(other),
+    }
+}
+
+pub fn firewall_block(ip: String) -> Result<()> {
+    match call(Request::FirewallBlock { ip: ip.clone() })? {
+        Response::Ack => {
+            println!("requested block of outbound {ip}; follow `talos agent events`");
+            Ok(())
+        }
+        other => unexpected(other),
+    }
+}
+
 fn on_off(b: bool) -> &'static str {
     if b {
         "on"

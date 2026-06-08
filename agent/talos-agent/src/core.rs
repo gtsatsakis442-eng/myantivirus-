@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -76,6 +76,8 @@ pub struct Shared {
     started: Instant,
     realtime_on: AtomicBool,
     firewall_on: AtomicBool,
+    /// Count of outbound IPs currently blocked by Talos firewall rules.
+    firewall_blocked: AtomicUsize,
     shutdown: Arc<AtomicBool>,
     /// True while an agent-initiated scan is running (anti-abuse: one at a time).
     scanning: AtomicBool,
@@ -108,6 +110,7 @@ impl Shared {
             started: Instant::now(),
             realtime_on: AtomicBool::new(true),
             firewall_on: AtomicBool::new(false),
+            firewall_blocked: AtomicUsize::new(0),
             shutdown,
             scanning: AtomicBool::new(false),
             scan_seq: AtomicU64::new(0),
@@ -225,6 +228,10 @@ impl Shared {
                 self.spawn_firewall(on);
                 Response::Ack
             }
+            Request::FirewallBlock { ip } => {
+                self.spawn_firewall_block(ip);
+                Response::Ack
+            }
             Request::GetEvents { since } => match self.events.lock() {
                 Ok(log) => {
                     let (events, next) = log.since(since);
@@ -283,6 +290,7 @@ impl Shared {
             realtime: self.realtime_on.load(Ordering::Relaxed),
             realtime_enforcing: false,
             firewall: self.firewall_on.load(Ordering::Relaxed),
+            firewall_blocked: self.firewall_blocked.load(Ordering::Relaxed),
             hash_signatures: self.hash_count,
             yara_files: self.yara_files,
             quarantined,
@@ -433,9 +441,14 @@ impl Shared {
                 match firewall::sync_c2_blocklist(firewall::default_feodo_url()) {
                     Ok(report) => {
                         me.firewall_on.store(true, Ordering::Relaxed);
+                        me.firewall_blocked
+                            .fetch_add(report.applied, Ordering::Relaxed);
                         me.push_event(
                             severity::INFO,
-                            format!("firewall: blocked {} C2 IP(s)", report.applied),
+                            format!(
+                                "firewall: synced C2 blocklist — {} IP(s) blocked",
+                                report.applied
+                            ),
                             None,
                         );
                     }
@@ -447,9 +460,10 @@ impl Shared {
                 match firewall::flush() {
                     Ok(()) => {
                         me.firewall_on.store(false, Ordering::Relaxed);
+                        me.firewall_blocked.store(0, Ordering::Relaxed);
                         me.push_event(
                             severity::INFO,
-                            "firewall: Talos rules removed".to_string(),
+                            "firewall: all Talos rules removed".to_string(),
                             None,
                         );
                     }
@@ -457,6 +471,30 @@ impl Shared {
                         me.push_event(severity::ERROR, format!("firewall flush failed: {e}"), None)
                     }
                 }
+            }
+        });
+    }
+
+    /// Block a single user-specified outbound IPv4 via the OS firewall.
+    fn spawn_firewall_block(self: &Arc<Self>, ip: String) {
+        let me = Arc::clone(self);
+        std::thread::spawn(move || {
+            use scanner_core::firewall;
+            match firewall::block_ip(&ip) {
+                Ok(()) => {
+                    me.firewall_on.store(true, Ordering::Relaxed);
+                    me.firewall_blocked.fetch_add(1, Ordering::Relaxed);
+                    me.push_event(
+                        severity::BLOCKED,
+                        format!("firewall: blocked outbound {ip}"),
+                        None,
+                    );
+                }
+                Err(e) => me.push_event(
+                    severity::ERROR,
+                    format!("firewall: could not block {ip}: {e}"),
+                    None,
+                ),
             }
         });
     }

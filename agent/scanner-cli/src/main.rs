@@ -93,6 +93,11 @@ enum AgentAction {
         #[arg(long)]
         quarantine: bool,
     },
+    /// Manage the agent's OS-firewall rules (sync C2 list / block an IP / flush).
+    Firewall {
+        #[command(subcommand)]
+        action: FirewallAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -226,6 +231,11 @@ fn cmd_agent(action: AgentAction) -> ExitCode {
         AgentAction::Status => service::status(),
         AgentAction::Events => service::events(),
         AgentAction::Scan { paths, quarantine } => service::scan(paths, quarantine),
+        AgentAction::Firewall { action } => match action {
+            FirewallAction::Sync => service::firewall_sync(),
+            FirewallAction::Block { ip } => service::firewall_block(ip),
+            FirewallAction::Flush => service::firewall_flush(),
+        },
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

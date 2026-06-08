@@ -59,3 +59,22 @@ pub fn set_realtime(on: bool) {
         }
     });
 }
+
+/// Fire-and-forget: sync the C2 blocklist (on) or flush all Talos firewall
+/// rules (off) via the privileged agent.
+pub fn set_firewall(on: bool) {
+    std::thread::spawn(move || {
+        if let Some(endpoint) = read_endpoint() {
+            let _ = talos_ipc::client::call(&endpoint, Request::SetFirewall { on });
+        }
+    });
+}
+
+/// Fire-and-forget: ask the agent to block a specific outbound IPv4.
+pub fn block_ip(ip: String) {
+    std::thread::spawn(move || {
+        if let Some(endpoint) = read_endpoint() {
+            let _ = talos_ipc::client::call(&endpoint, Request::FirewallBlock { ip });
+        }
+    });
+}
