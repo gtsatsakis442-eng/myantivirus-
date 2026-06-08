@@ -1049,10 +1049,8 @@ impl TalosApp {
                 if let Some((on_now, _)) = fw {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut on = on_now;
-                        if ui
-                            .toggle_value(&mut on, if on { "On" } else { "Off" })
-                            .changed()
-                        {
+                        let label = if on { "On" } else { "Off" };
+                        if ui.toggle_value(&mut on, label).changed() {
                             toggle_fw = Some(on);
                         }
                     });
