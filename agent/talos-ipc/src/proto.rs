@@ -32,8 +32,10 @@ pub enum Request {
     Restore { id: String },
     /// Turn the real-time on-access monitor on or off.
     SetRealtime { on: bool },
-    /// Sync (on) or flush (off) the OS-firewall C2 blocklist.
+    /// Sync (on) the abuse.ch C2 blocklist, or flush (off) all Talos firewall rules.
     SetFirewall { on: bool },
+    /// Block a specific outbound IPv4 address via the OS firewall (user-added).
+    FirewallBlock { ip: String },
     /// Fetch activity events with `seq` greater than `since`.
     GetEvents { since: u64 },
     /// Ask the agent to stop (used by tooling/tests).
@@ -67,6 +69,9 @@ pub struct Status {
     pub realtime: bool,
     pub realtime_enforcing: bool,
     pub firewall: bool,
+    /// Number of outbound IPs currently blocked by Talos firewall rules.
+    #[serde(default)]
+    pub firewall_blocked: usize,
     pub hash_signatures: usize,
     pub yara_files: usize,
     pub quarantined: usize,

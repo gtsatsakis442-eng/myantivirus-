@@ -126,6 +126,7 @@ struct TalosApp {
 
     custom_path: String,
     new_exclusion: String,
+    firewall_ip: String,
 
     rx: Option<Receiver<ScanMsg>>,
     scanning: bool,
@@ -180,6 +181,7 @@ impl TalosApp {
             quarantined,
             custom_path: String::new(),
             new_exclusion: String::new(),
+            firewall_ip: String::new(),
             rx: None,
             scanning: false,
             scan_label: String::new(),
@@ -934,13 +936,19 @@ impl TalosApp {
         module_card(
             ui,
             "Antimalware Engine",
-            "Exact SHA-256 hash signatures for known-bad files.",
+            &format!(
+                "Exact SHA-256 hash signatures for known-bad files · {} loaded.",
+                self.hashes
+            ),
             ModuleStatus::Active,
         );
         module_card(
             ui,
             "YARA Rules",
-            "Pattern matching: web shells, malicious PowerShell, offensive tooling.",
+            &format!(
+                "Pattern matching: web shells, malicious PowerShell, offensive tooling · {} rule file(s).",
+                self.yara
+            ),
             ModuleStatus::Active,
         );
 
@@ -979,21 +987,29 @@ impl TalosApp {
         module_card(
             ui,
             "Quarantine Vault",
-            "Isolate detected files and restore false positives.",
+            &format!(
+                "Isolate detected files and restore false positives · {} item(s) in the vault.",
+                self.quarantined
+            ),
             ModuleStatus::Active,
         );
         module_card(
             ui,
             "Signature Updates",
-            "abuse.ch malware hashes + open YARA feeds, on demand.",
+            &format!(
+                "abuse.ch malware hashes + open YARA feeds, on demand · {} signatures loaded.",
+                self.hashes
+            ),
             ModuleStatus::Active,
         );
-        module_card(
-            ui,
-            "Ransomware Guard",
-            "Canary decoys detect mass-encryption in real time (active with Real-time).",
-            ModuleStatus::Active,
-        );
+        let rguard_desc = if self.agent_status.is_some() {
+            "Canary decoys detect mass-encryption in real time — always-on via the agent service."
+        } else if self.realtime.is_some() {
+            "Canary decoys detect mass-encryption in real time — active with Real-time."
+        } else {
+            "Canary decoys detect mass-encryption in real time (activates with Real-time or the agent)."
+        };
+        module_card(ui, "Ransomware Guard", rguard_desc, ModuleStatus::Active);
         module_card(
             ui,
             "Pre-execution Blocking",
@@ -1001,12 +1017,88 @@ impl TalosApp {
              Windows kernel minifilter = Phase 2.",
             ModuleStatus::Active,
         );
-        module_card(
-            ui,
-            "Firewall (C2 blocking)",
-            "Drops known C2 IPs via the OS firewall, netsh/iptables (`talos firewall sync`).",
-            ModuleStatus::Active,
-        );
+        // Firewall (C2 blocking) — interactive, routed through the privileged
+        // agent service (it has the OS-firewall privilege the GUI process lacks).
+        let fw = self
+            .agent_status
+            .as_ref()
+            .map(|a| (a.firewall, a.firewall_blocked));
+        let mut toggle_fw: Option<bool> = None;
+        let mut block_now = false;
+        let mut flush_now = false;
+        card(ui, CARD, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new("Firewall (C2 blocking)")
+                            .color(TEXT)
+                            .size(15.0)
+                            .strong(),
+                    );
+                    let desc = match fw {
+                        Some((_, n)) => format!(
+                            "Blocks outbound C2 traffic via the OS firewall · {n} IP(s) blocked. \
+                             Sync the abuse.ch list or block your own below."
+                        ),
+                        None => "Managed by the agent service (it has the privilege to change OS \
+                                 firewall rules). Install the agent to control the firewall here."
+                            .to_string(),
+                    };
+                    ui.label(RichText::new(desc).color(DIM).size(12.0));
+                });
+                if let Some((on_now, _)) = fw {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let mut on = on_now;
+                        if ui
+                            .toggle_value(&mut on, if on { "On" } else { "Off" })
+                            .changed()
+                        {
+                            toggle_fw = Some(on);
+                        }
+                    });
+                }
+            });
+            if fw.is_some() {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Block IP:").color(DIM).size(12.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.firewall_ip)
+                            .desired_width(170.0)
+                            .hint_text("203.0.113.7"),
+                    );
+                    if secondary_button(ui, "Block").clicked() {
+                        block_now = true;
+                    }
+                    if secondary_button(ui, "Flush all").clicked() {
+                        flush_now = true;
+                    }
+                });
+            }
+        });
+        ui.add_space(8.0);
+        // Apply firewall actions outside the egui closures (no nested &mut self).
+        if let Some(on) = toggle_fw {
+            agent_link::set_firewall(on);
+            self.status = format!(
+                "C2 blocklist {} via the agent service.",
+                if on { "syncing" } else { "flushed" }
+            );
+        }
+        if block_now {
+            let ip = self.firewall_ip.trim().to_string();
+            if ip.is_empty() {
+                self.status = "Enter an IPv4 address to block.".to_string();
+            } else {
+                agent_link::block_ip(ip);
+                self.firewall_ip.clear();
+                self.status = "Requested outbound IP block via the agent.".to_string();
+            }
+        }
+        if flush_now {
+            agent_link::set_firewall(false);
+            self.status = "Removing all Talos firewall rules…".to_string();
+        }
 
         ui.add_space(12.0);
         nav_section(ui, "ROADMAP · PHASE 2 (KERNEL SENSOR)");
