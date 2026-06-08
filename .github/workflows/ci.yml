@@ -35,6 +35,11 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          # Fall back to the most recent cache for this OS so a Cargo.lock change
+          # (new dep / version bump) reuses prior artifacts instead of a full
+          # cold rebuild — only the changed crates recompile.
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Format check
         run: cargo fmt --all --check
@@ -56,6 +61,21 @@ jobs:
     needs: scanner
     steps:
       - uses: actions/checkout@v4
+
+      # Windows builds are the slow leg; cache the registry + target so repeat
+      # runs warm-start. Shares the key namespace with the Release workflow
+      # (both windows-msvc), so a release build can reuse this cache and vice
+      # versa.
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Build apps (release, windows-msvc)
         run: cargo build --release --locked -p scanner-cli -p talos-agent -p talos-gui --target x86_64-pc-windows-msvc

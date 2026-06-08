@@ -82,7 +82,7 @@ fn serve(listener: &std::net::TcpListener, shared: &Arc<Shared>) {
                     Ok(e) => e,
                     Err(_) => continue,
                 };
-                let response = if envelope.token != shared.token() {
+                let response = if !talos_ipc::token_matches(shared.token(), &envelope.token) {
                     Response::Error {
                         message: "unauthorized".to_string(),
                     }
