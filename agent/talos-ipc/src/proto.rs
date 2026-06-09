@@ -36,6 +36,8 @@ pub enum Request {
     SetFirewall { on: bool },
     /// Block a specific outbound IPv4 address via the OS firewall (user-added).
     FirewallBlock { ip: String },
+    /// Remove the firewall rule for a specific outbound IPv4 address.
+    FirewallUnblock { ip: String },
     /// Fetch activity events with `seq` greater than `since`.
     GetEvents { since: u64 },
     /// Ask the agent to stop (used by tooling/tests).

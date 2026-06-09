@@ -232,6 +232,10 @@ impl Shared {
                 self.spawn_firewall_block(ip);
                 Response::Ack
             }
+            Request::FirewallUnblock { ip } => {
+                self.spawn_firewall_unblock(ip);
+                Response::Ack
+            }
             Request::GetEvents { since } => match self.events.lock() {
                 Ok(log) => {
                     let (events, next) = log.since(since);
@@ -493,6 +497,27 @@ impl Shared {
                 Err(e) => me.push_event(
                     severity::ERROR,
                     format!("firewall: could not block {ip}: {e}"),
+                    None,
+                ),
+            }
+        });
+    }
+
+    /// Remove the firewall rule for a single user-specified outbound IPv4.
+    fn spawn_firewall_unblock(self: &Arc<Self>, ip: String) {
+        let me = Arc::clone(self);
+        std::thread::spawn(move || {
+            use scanner_core::firewall;
+            match firewall::unblock_ip(&ip) {
+                Ok(()) => {
+                    let prev = me.firewall_blocked.load(Ordering::Relaxed);
+                    me.firewall_blocked
+                        .store(prev.saturating_sub(1), Ordering::Relaxed);
+                    me.push_event(severity::INFO, format!("firewall: unblocked {ip}"), None);
+                }
+                Err(e) => me.push_event(
+                    severity::ERROR,
+                    format!("firewall: could not unblock {ip}: {e}"),
                     None,
                 ),
             }
