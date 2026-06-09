@@ -1,5 +1,5 @@
 //! Path resolution and the on-disk **endpoint file** that lets local clients
-//! discover the running agent (loopback port + token).
+//! discover the running agent (local-socket name + token).
 
 use std::io;
 use std::path::PathBuf;
@@ -36,6 +36,16 @@ pub fn endpoint_path() -> PathBuf {
     data_dir().join("agent.endpoint")
 }
 
+/// The local-socket name the agent binds and clients connect to: a named pipe
+/// on Windows, a socket file under the data dir on Linux.
+pub fn endpoint_name() -> String {
+    if cfg!(windows) {
+        "talos-agent".to_string()
+    } else {
+        data_dir().join("agent.sock").to_string_lossy().into_owned()
+    }
+}
+
 /// High-risk locations the agent watches/scans by default (existing paths only).
 pub fn quick_scan_paths() -> Vec<PathBuf> {
     let mut out = Vec::new();
@@ -66,7 +76,7 @@ fn push_env(out: &mut Vec<PathBuf>, var: &str, sub: &[&str]) {
     }
 }
 
-/// Generate an unguessable per-session token for the loopback IPC channel.
+/// Generate an unguessable per-session token for the local IPC channel.
 ///
 /// This is a same-host shared secret kept in a private file (its confidentiality
 /// comes from file permissions); the value just needs to be unpredictable to
@@ -84,7 +94,7 @@ pub fn generate_token() -> String {
     scanner_core::hash_bytes(seed.as_bytes()).sha256
 }
 
-/// Persist the endpoint (port + token) for clients, with private permissions.
+/// Persist the endpoint (socket name + token) for clients, with private perms.
 pub fn write_endpoint(info: &EndpointInfo) -> io::Result<()> {
     let path = endpoint_path();
     if let Some(parent) = path.parent() {

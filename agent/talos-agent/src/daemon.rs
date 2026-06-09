@@ -13,8 +13,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use scanner_core::{ransom_guard, realtime, Scanner};
 use talos_ipc::frame::{read_msg, write_msg};
-use talos_ipc::transport::bind_loopback;
-use talos_ipc::{EndpointInfo, Envelope, Response};
+use talos_ipc::transport::{accept, bind};
+use talos_ipc::{EndpointInfo, Envelope, Listener, Response, Stream};
 
 use crate::core::Shared;
 
@@ -34,9 +34,10 @@ pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
 
     let roots = crate::paths::quick_scan_paths();
     let token = crate::paths::generate_token();
-    let (listener, port) = bind_loopback().context("binding the agent IPC socket")?;
+    let name = crate::paths::endpoint_name();
+    let listener = bind(&name).context("binding the agent IPC socket")?;
     crate::paths::write_endpoint(&EndpointInfo {
-        port,
+        name: name.clone(),
         token: token.clone(),
     })
     .context("publishing the agent endpoint")?;
@@ -52,7 +53,7 @@ pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
     ));
 
     eprintln!(
-        "talos-agent {} — {hash_count} hash signature(s), {yara_files} YARA file(s); IPC on 127.0.0.1:{port}",
+        "talos-agent {} — {hash_count} hash signature(s), {yara_files} YARA file(s); IPC at {name}",
         env!("CARGO_PKG_VERSION")
     );
 
@@ -68,35 +69,35 @@ pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
     Ok(())
 }
 
-/// IPC accept loop: one authenticated request/response per connection. Uses a
-/// non-blocking listener so it exits promptly once `shutdown` is set (a blocking
-/// `accept` would otherwise hang past a Service stop).
-fn serve(listener: &std::net::TcpListener, shared: &Arc<Shared>) {
-    let _ = listener.set_nonblocking(true);
+/// IPC accept loop: non-blocking accept so it exits promptly once `shutdown` is
+/// set, with one short-lived thread per connection (so a slow/stuck client can't
+/// stall the loop, and well-behaved clients are served concurrently).
+fn serve(listener: &Listener, shared: &Arc<Shared>) {
     while !shared.shutdown_requested() {
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let _ = stream.set_nonblocking(false);
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                let envelope: Envelope = match read_msg(&mut stream) {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-                let response = if !talos_ipc::token_matches(shared.token(), &envelope.token) {
-                    Response::Error {
-                        message: "unauthorized".to_string(),
-                    }
-                } else {
-                    shared.handle(envelope.request)
-                };
-                let _ = write_msg(&mut stream, &response);
+        match accept(listener) {
+            Ok(Some(stream)) => {
+                let shared = Arc::clone(shared);
+                thread::spawn(move || handle_conn(stream, shared));
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(_) => thread::sleep(Duration::from_millis(100)),
+            Ok(None) | Err(_) => thread::sleep(Duration::from_millis(100)),
         }
     }
+}
+
+/// Authenticate and answer one client connection.
+fn handle_conn(mut stream: Stream, shared: Arc<Shared>) {
+    let envelope: Envelope = match read_msg(&mut stream) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let response = if !talos_ipc::token_matches(shared.token(), &envelope.token) {
+        Response::Error {
+            message: "unauthorized".to_string(),
+        }
+    } else {
+        shared.handle(envelope.request)
+    };
+    let _ = write_msg(&mut stream, &response);
 }
 
 /// Real-time on-access monitor: scan each created/changed file, auto-quarantine

@@ -4,12 +4,12 @@ use std::io;
 
 use crate::frame::{read_msg, write_msg};
 use crate::proto::{Envelope, Request, Response};
-use crate::transport::{connect_loopback, EndpointInfo};
+use crate::transport::{connect, EndpointInfo};
 
-/// Connect to the agent, send a single authenticated `request`, and read the
-/// one `Response`. The connection is closed when this returns.
+/// Connect to the agent's local socket, send a single authenticated `request`,
+/// and read the one `Response`. The connection is closed when this returns.
 pub fn call(endpoint: &EndpointInfo, request: Request) -> io::Result<Response> {
-    let mut stream = connect_loopback(endpoint.port)?;
+    let mut stream = connect(&endpoint.name)?;
     let envelope = Envelope {
         token: endpoint.token.clone(),
         request,
