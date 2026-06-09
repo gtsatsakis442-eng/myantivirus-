@@ -70,6 +70,11 @@ enum Command {
         #[command(subcommand)]
         action: FirewallAction,
     },
+    /// Web protection: sinkhole known-malicious domains in the hosts file (needs admin/root).
+    Web {
+        #[command(subcommand)]
+        action: WebAction,
+    },
     /// Talk to the running agent service (thin client over local IPC).
     Agent {
         #[command(subcommand)]
@@ -98,6 +103,11 @@ enum AgentAction {
         #[command(subcommand)]
         action: FirewallAction,
     },
+    /// Manage the agent's web/domain protection (sync the URLhaus list / clear).
+    Web {
+        #[command(subcommand)]
+        action: WebAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -116,6 +126,14 @@ enum FirewallAction {
     },
     /// Remove all Talos-created firewall rules.
     Flush,
+}
+
+#[derive(Subcommand, Debug)]
+enum WebAction {
+    /// Fetch the abuse.ch URLhaus blocklist and sinkhole the domains.
+    Sync,
+    /// Remove Talos's domain blocklist from the hosts file.
+    Clear,
 }
 
 #[derive(Args, Debug)]
@@ -226,6 +244,7 @@ fn main() -> ExitCode {
         Some(Command::Ingest(args)) => cmd_ingest(args),
         Some(Command::Guard { paths }) => cmd_guard(paths),
         Some(Command::Firewall { action }) => cmd_firewall(action),
+        Some(Command::Web { action }) => cmd_web(action),
         Some(Command::Agent { action }) => cmd_agent(action),
         Some(Command::Selftest) => cmd_selftest(),
     }
@@ -241,6 +260,10 @@ fn cmd_agent(action: AgentAction) -> ExitCode {
             FirewallAction::Block { ip } => service::firewall_block(ip),
             FirewallAction::Unblock { ip } => service::firewall_unblock(ip),
             FirewallAction::Flush => service::firewall_flush(),
+        },
+        AgentAction::Web { action } => match action {
+            WebAction::Sync => service::web_protection(true),
+            WebAction::Clear => service::web_protection(false),
         },
     };
     match result {
@@ -419,6 +442,33 @@ fn cmd_firewall(action: FirewallAction) -> ExitCode {
             FirewallAction::Flush => {
                 firewall::flush()?;
                 println!("removed Talos firewall rules");
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => fail(e),
+    }
+}
+
+fn cmd_web(action: WebAction) -> ExitCode {
+    use scanner_core::webprotect;
+    let result = (|| -> Result<()> {
+        match action {
+            WebAction::Sync => {
+                eprintln!(
+                    "Syncing URLhaus malicious-domain blocklist into the hosts file \
+                     (needs Administrator/root)…"
+                );
+                let report = webprotect::sync_blocklist(webprotect::default_urlhaus_url())?;
+                for m in &report.messages {
+                    println!("  {m}");
+                }
+            }
+            WebAction::Clear => {
+                webprotect::clear()?;
+                println!("cleared Talos domain blocklist from the hosts file");
             }
         }
         Ok(())

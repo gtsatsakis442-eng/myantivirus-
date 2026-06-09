@@ -115,6 +115,20 @@ pub fn firewall_unblock(ip: String) -> Result<()> {
     }
 }
 
+/// `talos agent web sync|clear` — manage web/domain protection via the agent.
+pub fn web_protection(on: bool) -> Result<()> {
+    match call(Request::SetWebProtection { on })? {
+        Response::Ack => {
+            println!(
+                "requested web protection {}; follow `talos agent events`",
+                if on { "sync" } else { "clear" }
+            );
+            Ok(())
+        }
+        other => unexpected(other),
+    }
+}
+
 fn on_off(b: bool) -> &'static str {
     if b {
         "on"

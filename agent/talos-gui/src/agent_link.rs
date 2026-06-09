@@ -88,6 +88,16 @@ pub fn set_firewall(on: bool) {
     });
 }
 
+/// Fire-and-forget: enable (sync URLhaus domain blocklist) or disable web
+/// protection via the privileged agent.
+pub fn set_web_protection(on: bool) {
+    std::thread::spawn(move || {
+        if let Some(endpoint) = read_endpoint() {
+            let _ = talos_ipc::client::call(&endpoint, Request::SetWebProtection { on });
+        }
+    });
+}
+
 /// Fire-and-forget: ask the agent to block a specific outbound IPv4.
 pub fn block_ip(ip: String) {
     std::thread::spawn(move || {

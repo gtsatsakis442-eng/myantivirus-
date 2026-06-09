@@ -42,6 +42,7 @@ pub mod realtime;
 pub mod report;
 pub mod signatures;
 pub mod verdict;
+pub mod webprotect;
 pub mod yara_engine;
 
 pub use archive::ArchiveLimits;
