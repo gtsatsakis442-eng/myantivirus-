@@ -25,14 +25,14 @@ use config::{Schedule, TalosConfig};
 use engine_glue::ScanMsg;
 
 // ---- palette -------------------------------------------------------------
-const BG: Color32 = Color32::from_rgb(0x12, 0x16, 0x1d);
-const PANEL: Color32 = Color32::from_rgb(0x18, 0x1d, 0x26);
-const CARD: Color32 = Color32::from_rgb(0x1f, 0x26, 0x31);
-const TEXT: Color32 = Color32::from_rgb(0xe6, 0xe9, 0xef);
-const DIM: Color32 = Color32::from_rgb(0x93, 0x9f, 0xb0);
-const ACCENT: Color32 = Color32::from_rgb(0xe1, 0x1d, 0x2a); // Talos red
-const GREEN: Color32 = Color32::from_rgb(0x2b, 0xd6, 0x6a);
-const AMBER: Color32 = Color32::from_rgb(0xff, 0xb0, 0x20);
+const BG: Color32 = Color32::from_rgb(0x09, 0x0b, 0x10);
+const PANEL: Color32 = Color32::from_rgb(0x0e, 0x11, 0x17);
+const CARD: Color32 = Color32::from_rgb(0x15, 0x19, 0x21);
+const TEXT: Color32 = Color32::from_rgb(0xf0, 0xf2, 0xf5);
+const DIM: Color32 = Color32::from_rgb(0x8a, 0x94, 0xa3);
+const ACCENT: Color32 = Color32::from_rgb(0xff, 0x2d, 0x3a); // Vibrant Talos red
+const GREEN: Color32 = Color32::from_rgb(0x00, 0xe6, 0x76);
+const AMBER: Color32 = Color32::from_rgb(0xff, 0x91, 0x00);
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
@@ -69,19 +69,24 @@ fn install_theme(ctx: &egui::Context) {
     v.window_fill = PANEL;
     v.extreme_bg_color = BG;
     v.override_text_color = Some(TEXT);
-    v.selection.bg_fill = ACCENT.linear_multiply(0.55);
+    v.selection.bg_fill = ACCENT.linear_multiply(0.4);
     v.widgets.hovered.bg_fill = CARD;
+    v.widgets.hovered.rounding = egui::Rounding::same(8.0);
     v.widgets.inactive.bg_fill = CARD;
+    v.widgets.inactive.rounding = egui::Rounding::same(8.0);
     v.widgets.active.bg_fill = ACCENT;
+    v.widgets.active.rounding = egui::Rounding::same(8.0);
+    v.window_rounding = egui::Rounding::same(12.0);
     ctx.set_visuals(v);
 
     let mut style = (*ctx.style()).clone();
-    // Tighter horizontal gap so an inline icon/dot hugs its label; a snug
-    // vertical gap so a title and its description group together (explicit
-    // add_space() calls still separate sections). Roomier buttons read cleaner.
-    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
-    style.spacing.button_padding = egui::vec2(14.0, 9.0);
-    style.spacing.interact_size.y = 26.0;
+    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+    style.spacing.button_padding = egui::vec2(16.0, 10.0);
+    style.spacing.interact_size.y = 30.0;
+    style.visuals.window_shadow = egui::Shadow {
+        extrusion: 20.0,
+        color: Color32::from_black_alpha(40),
+    };
     ctx.set_style(style);
 }
 
@@ -588,8 +593,8 @@ impl TalosApp {
                 ui.add_space(2.0);
             }
             ui.vertical(|ui| {
-                ui.label(RichText::new("TALOS").color(ACCENT).size(23.0).strong());
-                ui.label(RichText::new("Endpoint Protection").color(DIM).size(11.0));
+                ui.label(RichText::new("TALOS").color(ACCENT).size(26.0).strong().letter_spacing(1.5));
+                ui.label(RichText::new("Endpoint Protection").color(DIM).size(12.0).strong());
             });
         });
         ui.add_space(16.0);
@@ -663,15 +668,16 @@ impl TalosApp {
                 }
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("●").color(status_col).size(16.0));
-                        ui.label(RichText::new(title).color(TEXT).size(24.0).strong());
+                        ui.label(RichText::new("●").color(status_col).size(18.0));
+                        ui.label(RichText::new(title).color(TEXT).size(28.0).strong());
                     });
-                    ui.label(RichText::new(subtitle).color(DIM).size(13.0));
-                    ui.add_space(2.0);
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(subtitle).color(TEXT.linear_multiply(0.8)).size(15.0));
+                    ui.add_space(4.0);
                     ui.label(
-                        RichText::new("Talos — the bronze guardian")
+                        RichText::new("Talos — the bronze guardian sentinel")
                             .color(AMBER)
-                            .size(11.0)
+                            .size(12.0)
                             .italics(),
                     );
                 });
@@ -1803,8 +1809,9 @@ fn heading(ui: &mut egui::Ui, text: &str) {
 fn card<R>(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::none()
         .fill(fill)
-        .rounding(10.0)
-        .inner_margin(16.0)
+        .rounding(12.0)
+        .inner_margin(20.0)
+        .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(5)))
         .show(ui, add)
         .inner
 }
@@ -1814,21 +1821,24 @@ fn card<R>(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui) -> 
 fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, value_col: Color32, unit: &str) {
     egui::Frame::none()
         .fill(CARD)
-        .rounding(10.0)
-        .inner_margin(14.0)
+        .rounding(12.0)
+        .inner_margin(16.0)
+        .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(8)))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.set_min_height(58.0);
+            ui.set_min_height(70.0);
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(title.to_uppercase())
                         .color(DIM)
-                        .size(10.5)
-                        .strong(),
+                        .size(11.0)
+                        .strong()
+                        .letter_spacing(0.5),
                 );
-                ui.add_space(3.0);
-                ui.label(RichText::new(value).color(value_col).size(23.0).strong());
-                ui.label(RichText::new(unit).color(DIM).size(10.5));
+                ui.add_space(4.0);
+                ui.label(RichText::new(value).color(value_col).size(26.0).strong());
+                ui.add_space(2.0);
+                ui.label(RichText::new(unit).color(DIM).size(11.0));
             });
         });
 }
@@ -1889,21 +1899,24 @@ fn module_toggle(ui: &mut egui::Ui, name: &str, desc: &str, on: &mut bool) -> bo
 
 fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add_sized(
-        [ui.available_width().min(220.0), 40.0],
+        [ui.available_width().min(220.0), 42.0],
         egui::Button::new(
             RichText::new(text)
                 .color(Color32::WHITE)
-                .size(15.0)
+                .size(16.0)
                 .strong(),
         )
-        .fill(ACCENT),
+        .fill(ACCENT)
+        .rounding(10.0),
     )
 }
 
 fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add_sized(
-        [120.0, 34.0],
-        egui::Button::new(RichText::new(text).color(TEXT)),
+        [120.0, 36.0],
+        egui::Button::new(RichText::new(text).color(TEXT))
+            .fill(CARD.linear_multiply(1.2))
+            .rounding(8.0),
     )
 }
 
