@@ -1138,6 +1138,53 @@ impl TalosApp {
             self.status = "Removing all Talos firewall rules…".to_string();
         }
 
+        // Web / domain protection — interactive, agent-mediated (hosts-file
+        // sinkhole of known-malicious domains from abuse.ch URLhaus).
+        let web = self
+            .agent_status
+            .as_ref()
+            .map(|a| (a.web_protection, a.web_blocked));
+        let mut toggle_web: Option<bool> = None;
+        card(ui, CARD, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new("Web Protection (malicious domains)")
+                            .color(TEXT)
+                            .size(15.0)
+                            .strong(),
+                    );
+                    let desc = match web {
+                        Some((_, n)) => format!(
+                            "Sinkholes known-malicious domains (abuse.ch URLhaus) at the OS \
+                             resolver · {n} domain(s) blocked."
+                        ),
+                        None => "Blocks known-malicious domains via the agent service (hosts-file \
+                                 sinkhole; needs privilege). Install the agent to control it here."
+                            .to_string(),
+                    };
+                    ui.label(RichText::new(desc).color(DIM).size(12.0));
+                });
+                if let Some((on_now, _)) = web {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let mut on = on_now;
+                        let label = if on { "On" } else { "Off" };
+                        if ui.toggle_value(&mut on, label).changed() {
+                            toggle_web = Some(on);
+                        }
+                    });
+                }
+            });
+        });
+        ui.add_space(8.0);
+        if let Some(on) = toggle_web {
+            agent_link::set_web_protection(on);
+            self.status = format!(
+                "Web protection {} via the agent service.",
+                if on { "syncing" } else { "cleared" }
+            );
+        }
+
         ui.add_space(12.0);
         nav_section(ui, "ROADMAP · PHASE 2 (KERNEL SENSOR)");
         for (name, desc) in [
@@ -1146,8 +1193,8 @@ impl TalosApp {
                 "Kernel file-system minifilter + AMSI to block before run.",
             ),
             (
-                "Web Protection",
-                "Block malicious URLs and phishing in the browser.",
+                "Web Protection — in-browser URL filtering",
+                "Per-URL inspection + phishing block (domain-level blocking is Active above).",
             ),
             (
                 "Ransomware Rollback",

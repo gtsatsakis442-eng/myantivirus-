@@ -217,7 +217,7 @@ fn is_ipv4(s: &str) -> bool {
     parts == 4
 }
 
-fn fetch_https(url: &str) -> Result<String> {
+pub(crate) fn fetch_https(url: &str) -> Result<String> {
     if !url.starts_with("https://") {
         return Err(ScanError::Update(format!("refusing non-HTTPS URL: {url}")));
     }

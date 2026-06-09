@@ -38,6 +38,9 @@ pub enum Request {
     FirewallBlock { ip: String },
     /// Remove the firewall rule for a specific outbound IPv4 address.
     FirewallUnblock { ip: String },
+    /// Enable (sync the URLhaus malicious-domain blocklist into the hosts file)
+    /// or disable (clear it) web/domain protection.
+    SetWebProtection { on: bool },
     /// Fetch activity events with `seq` greater than `since`.
     GetEvents { since: u64 },
     /// Ask the agent to stop (used by tooling/tests).
@@ -74,6 +77,12 @@ pub struct Status {
     /// Number of outbound IPs currently blocked by Talos firewall rules.
     #[serde(default)]
     pub firewall_blocked: usize,
+    /// Web/domain protection (URLhaus hosts-file sinkhole) on, and how many
+    /// domains are currently blocked.
+    #[serde(default)]
+    pub web_protection: bool,
+    #[serde(default)]
+    pub web_blocked: usize,
     pub hash_signatures: usize,
     pub yara_files: usize,
     pub quarantined: usize,

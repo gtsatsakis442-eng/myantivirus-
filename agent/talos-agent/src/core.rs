@@ -78,6 +78,9 @@ pub struct Shared {
     firewall_on: AtomicBool,
     /// Count of outbound IPs currently blocked by Talos firewall rules.
     firewall_blocked: AtomicUsize,
+    /// Web/domain protection (URLhaus hosts-file sinkhole) state + domain count.
+    web_on: AtomicBool,
+    web_blocked: AtomicUsize,
     shutdown: Arc<AtomicBool>,
     /// True while an agent-initiated scan is running (anti-abuse: one at a time).
     scanning: AtomicBool,
@@ -111,6 +114,8 @@ impl Shared {
             realtime_on: AtomicBool::new(true),
             firewall_on: AtomicBool::new(false),
             firewall_blocked: AtomicUsize::new(0),
+            web_on: AtomicBool::new(false),
+            web_blocked: AtomicUsize::new(0),
             shutdown,
             scanning: AtomicBool::new(false),
             scan_seq: AtomicU64::new(0),
@@ -236,6 +241,10 @@ impl Shared {
                 self.spawn_firewall_unblock(ip);
                 Response::Ack
             }
+            Request::SetWebProtection { on } => {
+                self.spawn_webprotect(on);
+                Response::Ack
+            }
             Request::GetEvents { since } => match self.events.lock() {
                 Ok(log) => {
                     let (events, next) = log.since(since);
@@ -295,6 +304,8 @@ impl Shared {
             realtime_enforcing: false,
             firewall: self.firewall_on.load(Ordering::Relaxed),
             firewall_blocked: self.firewall_blocked.load(Ordering::Relaxed),
+            web_protection: self.web_on.load(Ordering::Relaxed),
+            web_blocked: self.web_blocked.load(Ordering::Relaxed),
             hash_signatures: self.hash_count,
             yara_files: self.yara_files,
             quarantined,
@@ -520,6 +531,52 @@ impl Shared {
                     format!("firewall: could not unblock {ip}: {e}"),
                     None,
                 ),
+            }
+        });
+    }
+
+    /// Sync (on) or clear (off) the URLhaus malicious-domain hosts-file sinkhole.
+    fn spawn_webprotect(self: &Arc<Self>, on: bool) {
+        let me = Arc::clone(self);
+        std::thread::spawn(move || {
+            use scanner_core::webprotect;
+            if on {
+                match webprotect::sync_blocklist(webprotect::default_urlhaus_url()) {
+                    Ok(report) => {
+                        me.web_on.store(true, Ordering::Relaxed);
+                        me.web_blocked.store(report.domains, Ordering::Relaxed);
+                        me.push_event(
+                            severity::INFO,
+                            format!(
+                                "web protection: {} malicious domain(s) blocked",
+                                report.domains
+                            ),
+                            None,
+                        );
+                    }
+                    Err(e) => me.push_event(
+                        severity::ERROR,
+                        format!("web protection sync failed: {e}"),
+                        None,
+                    ),
+                }
+            } else {
+                match webprotect::clear() {
+                    Ok(()) => {
+                        me.web_on.store(false, Ordering::Relaxed);
+                        me.web_blocked.store(0, Ordering::Relaxed);
+                        me.push_event(
+                            severity::INFO,
+                            "web protection: domain blocklist cleared".to_string(),
+                            None,
+                        );
+                    }
+                    Err(e) => me.push_event(
+                        severity::ERROR,
+                        format!("web protection clear failed: {e}"),
+                        None,
+                    ),
+                }
             }
         });
     }
