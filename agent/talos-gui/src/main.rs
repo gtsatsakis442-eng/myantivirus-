@@ -157,6 +157,10 @@ struct TalosApp {
     agent_status: Option<talos_ipc::Status>,
     agent_rx: Option<Receiver<Option<talos_ipc::Status>>>,
     agent_polled_at: u64,
+    /// The agent service's activity log (when present), polled over IPC.
+    agent_events: Vec<talos_ipc::Event>,
+    agent_events_rx: Option<Receiver<Vec<talos_ipc::Event>>>,
+    agent_events_polled_at: u64,
 
     intel_query: String,
     intel_source: String,
@@ -205,6 +209,9 @@ impl TalosApp {
             agent_status: None,
             agent_rx: None,
             agent_polled_at: 0,
+            agent_events: Vec::new(),
+            agent_events_rx: None,
+            agent_events_polled_at: 0,
             intel_query: String::new(),
             intel_source: String::new(),
             intel_lines: Vec::new(),
@@ -499,6 +506,25 @@ impl TalosApp {
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => self.agent_rx = None,
+            }
+        }
+
+        // Poll the agent's activity log while it's present (every ~3s).
+        if self.agent_status.is_some()
+            && self.agent_events_rx.is_none()
+            && nowu.saturating_sub(self.agent_events_polled_at) >= 3
+        {
+            self.agent_events_polled_at = nowu;
+            self.agent_events_rx = Some(agent_link::start_events_poll());
+        }
+        if let Some(rx) = &self.agent_events_rx {
+            match rx.try_recv() {
+                Ok(events) => {
+                    self.agent_events = events;
+                    self.agent_events_rx = None;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => self.agent_events_rx = None,
             }
         }
 
@@ -1025,6 +1051,7 @@ impl TalosApp {
             .map(|a| (a.firewall, a.firewall_blocked));
         let mut toggle_fw: Option<bool> = None;
         let mut block_now = false;
+        let mut unblock_now = false;
         let mut flush_now = false;
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
@@ -1068,6 +1095,9 @@ impl TalosApp {
                     if secondary_button(ui, "Block").clicked() {
                         block_now = true;
                     }
+                    if secondary_button(ui, "Unblock").clicked() {
+                        unblock_now = true;
+                    }
                     if secondary_button(ui, "Flush all").clicked() {
                         flush_now = true;
                     }
@@ -1091,6 +1121,16 @@ impl TalosApp {
                 agent_link::block_ip(ip);
                 self.firewall_ip.clear();
                 self.status = "Requested outbound IP block via the agent.".to_string();
+            }
+        }
+        if unblock_now {
+            let ip = self.firewall_ip.trim().to_string();
+            if ip.is_empty() {
+                self.status = "Enter an IPv4 address to unblock.".to_string();
+            } else {
+                agent_link::unblock_ip(ip);
+                self.firewall_ip.clear();
+                self.status = "Requested outbound IP unblock via the agent.".to_string();
             }
         }
         if flush_now {
@@ -1330,14 +1370,19 @@ impl TalosApp {
             if secondary_button(ui, "Refresh").clicked() {
                 self.reload_activity();
             }
-            ui.label(RichText::new(format!("{} event(s)", self.activity.len())).color(DIM));
+            let total = self.activity.len() + self.agent_events.len();
+            ui.label(RichText::new(format!("{total} event(s)")).color(DIM));
         });
         ui.add_space(6.0);
 
-        if self.activity.is_empty() {
+        if self.activity.is_empty() && self.agent_events.is_empty() {
             card(ui, CARD, |ui| {
                 ui.label(
-                    RichText::new("No activity yet. Run a scan or update signatures.").color(DIM),
+                    RichText::new(
+                        "No activity yet. Run a scan, or install the agent for live \
+                         protection events.",
+                    )
+                    .color(DIM),
                 );
             });
             return;
@@ -1346,23 +1391,67 @@ impl TalosApp {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for e in &self.activity {
-                    card(ui, CARD, |ui| {
-                        ui.horizontal(|ui| {
-                            let col = match e.kind.as_str() {
-                                "scan" => GREEN,
-                                "update" => AMBER,
-                                "quarantine" => ACCENT,
-                                _ => DIM,
-                            };
-                            ui.label(RichText::new("●").color(col).size(13.0));
-                            ui.add_space(4.0);
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(&e.summary).color(TEXT).size(12.0));
-                                ui.label(RichText::new(time_ago(e.unix)).color(DIM).size(11.0));
+                // Live protection events streamed from the agent service (newest first).
+                if !self.agent_events.is_empty() {
+                    ui.label(
+                        RichText::new("LIVE PROTECTION · AGENT SERVICE")
+                            .color(DIM)
+                            .size(10.5)
+                            .strong(),
+                    );
+                    ui.add_space(2.0);
+                    for e in self.agent_events.iter().rev() {
+                        card(ui, CARD, |ui| {
+                            ui.horizontal(|ui| {
+                                let col = match e.severity.as_str() {
+                                    "threat" | "ransomware" => ACCENT,
+                                    "blocked" => GREEN,
+                                    "error" => AMBER,
+                                    _ => DIM,
+                                };
+                                ui.label(RichText::new("●").color(col).size(13.0));
+                                ui.add_space(4.0);
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&e.message).color(TEXT).size(12.0));
+                                    let when = time_ago(e.unix);
+                                    let sub = match &e.path {
+                                        Some(p) => format!("{when} · {p}"),
+                                        None => when,
+                                    };
+                                    ui.label(RichText::new(sub).color(DIM).size(11.0));
+                                });
                             });
                         });
-                    });
+                    }
+                    ui.add_space(8.0);
+                }
+
+                if !self.activity.is_empty() {
+                    ui.label(
+                        RichText::new("LOCAL ACTIVITY")
+                            .color(DIM)
+                            .size(10.5)
+                            .strong(),
+                    );
+                    ui.add_space(2.0);
+                    for e in &self.activity {
+                        card(ui, CARD, |ui| {
+                            ui.horizontal(|ui| {
+                                let col = match e.kind.as_str() {
+                                    "scan" => GREEN,
+                                    "update" => AMBER,
+                                    "quarantine" => ACCENT,
+                                    _ => DIM,
+                                };
+                                ui.label(RichText::new("●").color(col).size(13.0));
+                                ui.add_space(4.0);
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&e.summary).color(TEXT).size(12.0));
+                                    ui.label(RichText::new(time_ago(e.unix)).color(DIM).size(11.0));
+                                });
+                            });
+                        });
+                    }
                 }
             });
     }

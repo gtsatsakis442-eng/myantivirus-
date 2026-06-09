@@ -105,6 +105,16 @@ pub fn firewall_block(ip: String) -> Result<()> {
     }
 }
 
+pub fn firewall_unblock(ip: String) -> Result<()> {
+    match call(Request::FirewallUnblock { ip: ip.clone() })? {
+        Response::Ack => {
+            println!("requested unblock of outbound {ip}; follow `talos agent events`");
+            Ok(())
+        }
+        other => unexpected(other),
+    }
+}
+
 fn on_off(b: bool) -> &'static str {
     if b {
         "on"

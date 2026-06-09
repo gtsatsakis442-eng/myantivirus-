@@ -59,6 +59,15 @@ pub fn block_ip(ip: &str) -> Result<()> {
     run(prog, &args)
 }
 
+/// Remove the drop rule for a single IPv4 address (mirrors [`block_ip`]).
+pub fn unblock_ip(ip: &str) -> Result<()> {
+    if !is_ipv4(ip) {
+        return Err(ScanError::Update(format!("not an IPv4 address: {ip}")));
+    }
+    let (prog, args) = unblock_command(ip);
+    run(prog, &args)
+}
+
 /// Remove all Talos-created firewall rules.
 pub fn flush() -> Result<()> {
     let (prog, args) = flush_command();
@@ -86,6 +95,39 @@ fn block_command(ip: &str) -> (&'static str, Vec<String>) {
             "iptables",
             vec![
                 "-A".into(),
+                "OUTPUT".into(),
+                "-d".into(),
+                ip.to_string(),
+                "-m".into(),
+                "comment".into(),
+                "--comment".into(),
+                TAG.to_string(),
+                "-j".into(),
+                "DROP".into(),
+            ],
+        )
+    }
+}
+
+/// Build the platform command that removes the drop rule for `ip` (the inverse
+/// of [`block_command`]).
+fn unblock_command(ip: &str) -> (&'static str, Vec<String>) {
+    if cfg!(windows) {
+        (
+            "netsh",
+            vec![
+                "advfirewall".into(),
+                "firewall".into(),
+                "delete".into(),
+                "rule".into(),
+                format!("name={TAG}-{ip}"),
+            ],
+        )
+    } else {
+        (
+            "iptables",
+            vec![
+                "-D".into(),
                 "OUTPUT".into(),
                 "-d".into(),
                 ip.to_string(),
@@ -243,7 +285,24 @@ mod tests {
     }
 
     #[test]
+    fn unblock_command_targets_the_ip() {
+        let (prog, args) = unblock_command("1.2.3.4");
+        let joined = args.join(" ");
+        if cfg!(windows) {
+            assert_eq!(prog, "netsh");
+            assert!(joined.contains("delete"));
+            assert!(joined.contains("name=TalosBlock-1.2.3.4"));
+        } else {
+            assert_eq!(prog, "iptables");
+            assert!(joined.contains("-D"));
+            assert!(joined.contains("1.2.3.4"));
+            assert!(joined.contains("DROP"));
+        }
+    }
+
+    #[test]
     fn rejects_non_ip_block() {
         assert!(block_ip("example.com").is_err());
+        assert!(unblock_ip("example.com").is_err());
     }
 }

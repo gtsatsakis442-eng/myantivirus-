@@ -109,6 +109,11 @@ enum FirewallAction {
         /// IPv4 address to block (outbound).
         ip: String,
     },
+    /// Remove the rule for a single IPv4 address.
+    Unblock {
+        /// IPv4 address to unblock.
+        ip: String,
+    },
     /// Remove all Talos-created firewall rules.
     Flush,
 }
@@ -234,6 +239,7 @@ fn cmd_agent(action: AgentAction) -> ExitCode {
         AgentAction::Firewall { action } => match action {
             FirewallAction::Sync => service::firewall_sync(),
             FirewallAction::Block { ip } => service::firewall_block(ip),
+            FirewallAction::Unblock { ip } => service::firewall_unblock(ip),
             FirewallAction::Flush => service::firewall_flush(),
         },
     };
@@ -405,6 +411,10 @@ fn cmd_firewall(action: FirewallAction) -> ExitCode {
             FirewallAction::Block { ip } => {
                 firewall::block_ip(&ip)?;
                 println!("blocked outbound traffic to {ip}");
+            }
+            FirewallAction::Unblock { ip } => {
+                firewall::unblock_ip(&ip)?;
+                println!("unblocked outbound traffic to {ip}");
             }
             FirewallAction::Flush => {
                 firewall::flush()?;

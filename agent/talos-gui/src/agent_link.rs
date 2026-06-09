@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 
 use talos_ipc::proto::{Request, Response};
-use talos_ipc::{EndpointInfo, Status};
+use talos_ipc::{EndpointInfo, Event, Status};
 
 /// Per-machine data directory where the agent publishes its endpoint file —
 /// mirrors `talos-agent`'s own path resolution.
@@ -50,6 +50,24 @@ pub fn start_poll() -> Receiver<Option<Status>> {
     rx
 }
 
+/// Start a one-shot poll of the agent's activity log (full rolling buffer).
+/// Returns the events, or an empty vec if the agent is unreachable.
+pub fn start_events_poll() -> Receiver<Vec<Event>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let events = (|| {
+            let endpoint = read_endpoint()?;
+            match talos_ipc::client::call(&endpoint, Request::GetEvents { since: 0 }).ok()? {
+                Response::Events { events, .. } => Some(events),
+                _ => None,
+            }
+        })()
+        .unwrap_or_default();
+        let _ = tx.send(events);
+    });
+    rx
+}
+
 /// Fire-and-forget: ask the running agent to turn its real-time monitor on or
 /// off. The next status poll reflects the change.
 pub fn set_realtime(on: bool) {
@@ -75,6 +93,15 @@ pub fn block_ip(ip: String) {
     std::thread::spawn(move || {
         if let Some(endpoint) = read_endpoint() {
             let _ = talos_ipc::client::call(&endpoint, Request::FirewallBlock { ip });
+        }
+    });
+}
+
+/// Fire-and-forget: ask the agent to remove the rule for a specific IPv4.
+pub fn unblock_ip(ip: String) {
+    std::thread::spawn(move || {
+        if let Some(endpoint) = read_endpoint() {
+            let _ = talos_ipc::client::call(&endpoint, Request::FirewallUnblock { ip });
         }
     });
 }
