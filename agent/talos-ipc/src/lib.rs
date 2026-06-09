@@ -23,7 +23,7 @@ pub mod proto;
 pub mod transport;
 
 pub use proto::{Envelope, Event, QuarantineItem, Request, Response, Status, PROTOCOL_VERSION};
-pub use transport::EndpointInfo;
+pub use transport::{EndpointInfo, Listener, Stream};
 
 /// Constant-time comparison of the session token, so the auth check doesn't leak
 /// how many leading characters matched via its timing. Both values are the
