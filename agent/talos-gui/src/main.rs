@@ -69,24 +69,35 @@ fn install_theme(ctx: &egui::Context) {
     v.window_fill = PANEL;
     v.extreme_bg_color = BG;
     v.override_text_color = Some(TEXT);
-    v.selection.bg_fill = ACCENT.linear_multiply(0.4);
+    v.selection.bg_fill = ACCENT.linear_multiply(0.3);
     v.widgets.hovered.bg_fill = CARD;
-    v.widgets.hovered.rounding = egui::Rounding::same(8.0);
-    v.widgets.inactive.bg_fill = CARD;
-    v.widgets.inactive.rounding = egui::Rounding::same(8.0);
+    v.widgets.hovered.rounding = egui::Rounding::same(4.0);
+    v.widgets.inactive.bg_fill = PANEL;
+    v.widgets.inactive.rounding = egui::Rounding::same(4.0);
     v.widgets.active.bg_fill = ACCENT;
-    v.widgets.active.rounding = egui::Rounding::same(8.0);
-    v.window_rounding = egui::Rounding::same(12.0);
+    v.widgets.active.rounding = egui::Rounding::same(4.0);
+    v.window_rounding = egui::Rounding::same(0.0); // Sharp, enterprise edges
     ctx.set_visuals(v);
 
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-    style.spacing.button_padding = egui::vec2(16.0, 10.0);
-    style.spacing.interact_size.y = 30.0;
-    style.visuals.window_shadow = egui::Shadow {
-        extrusion: 20.0,
-        color: Color32::from_black_alpha(40),
-    };
+    style.spacing.item_spacing = egui::vec2(12.0, 10.0);
+    style.spacing.button_padding = egui::vec2(20.0, 12.0);
+    style.spacing.interact_size.y = 32.0;
+    
+    // Enterprise typography setup
+    use egui::{FontFamily, FontId, TextStyle};
+    let mut font_definitions = egui::FontDefinitions::default();
+    
+    // Use system sans-serif for that clean enterprise look
+    style.text_styles = [
+        (TextStyle::Heading, FontId::new(24.0, FontFamily::Proportional)),
+        (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
+        (TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace)),
+        (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
+        (TextStyle::Small, FontId::new(11.0, FontFamily::Proportional)),
+    ].into();
+
+    ctx.set_fonts(font_definitions);
     ctx.set_style(style);
 }
 
@@ -582,22 +593,12 @@ impl eframe::App for TalosApp {
 
 impl TalosApp {
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        let hero = self.hero_tex.clone();
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            if let Some(tex) = &hero {
-                ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                    tex.id(),
-                    egui::vec2(40.0, 40.0),
-                )));
-                ui.add_space(2.0);
-            }
-            ui.vertical(|ui| {
-                ui.label(RichText::new("TALOS").color(ACCENT).size(26.0).strong().letter_spacing(1.5));
-                ui.label(RichText::new("Endpoint Protection").color(DIM).size(12.0).strong());
-            });
+        ui.add_space(12.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new("TALOS").color(ACCENT).size(22.0).strong().letter_spacing(2.0));
+            ui.label(RichText::new("SYSTEM SECURITY").color(DIM).size(10.0).strong());
         });
-        ui.add_space(16.0);
+        ui.add_space(24.0);
 
         nav_section(ui, "SECURITY");
         nav(ui, &mut self.view, View::Dashboard, "Dashboard");
@@ -652,49 +653,31 @@ impl TalosApp {
             (GREEN, "You're protected", sub)
         };
 
-        // Hero protection-status banner: bronze guardian + status + action.
-        let hero = self.hero_tex.clone();
+        // Enterprise status banner: Minimalist and clean.
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
-                if let Some(tex) = &hero {
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                        tex.id(),
-                        egui::vec2(118.0, 118.0),
-                    )));
-                    ui.add_space(14.0);
-                } else {
-                    ui.label(RichText::new("●").color(status_col).size(46.0));
-                    ui.add_space(12.0);
-                }
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("●").color(status_col).size(18.0));
-                        ui.label(RichText::new(title).color(TEXT).size(28.0).strong());
+                        ui.label(RichText::new("●").color(status_col).size(20.0));
+                        ui.label(RichText::new(title.to_uppercase()).color(TEXT).size(22.0).strong().letter_spacing(1.0));
                     });
-                    ui.add_space(4.0);
-                    ui.label(RichText::new(subtitle).color(TEXT.linear_multiply(0.8)).size(15.0));
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("Talos — the bronze guardian sentinel")
-                            .color(AMBER)
-                            .size(12.0)
-                            .italics(),
-                    );
+                    ui.add_space(2.0);
+                    ui.label(RichText::new(subtitle).color(DIM).size(14.0));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = if self.scanning {
-                        "Scanning…"
+                        "SCANNING..."
                     } else {
-                        "Quick Scan"
+                        "QUICK SCAN"
                     };
                     let btn = egui::Button::new(
                         RichText::new(label)
                             .color(Color32::WHITE)
-                            .size(15.0)
+                            .size(14.0)
                             .strong(),
                     )
                     .fill(ACCENT)
-                    .min_size(egui::vec2(150.0, 40.0));
+                    .min_size(egui::vec2(160.0, 44.0));
                     if ui.add_enabled(!self.scanning, btn).clicked() {
                         self.start(engine_glue::quick_scan_paths(), "Quick");
                     }
@@ -1809,9 +1792,9 @@ fn heading(ui: &mut egui::Ui, text: &str) {
 fn card<R>(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::none()
         .fill(fill)
-        .rounding(12.0)
-        .inner_margin(20.0)
-        .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(5)))
+        .rounding(0.0) // Sharp enterprise edges
+        .inner_margin(24.0)
+        .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(15)))
         .show(ui, add)
         .inner
 }
@@ -1821,24 +1804,24 @@ fn card<R>(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui) -> 
 fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, value_col: Color32, unit: &str) {
     egui::Frame::none()
         .fill(CARD)
-        .rounding(12.0)
-        .inner_margin(16.0)
-        .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(8)))
+        .rounding(0.0)
+        .inner_margin(18.0)
+        .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(15)))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.set_min_height(70.0);
+            ui.set_min_height(80.0);
             ui.vertical(|ui| {
                 ui.label(
                     RichText::new(title.to_uppercase())
                         .color(DIM)
-                        .size(11.0)
+                        .size(10.0)
                         .strong()
-                        .letter_spacing(0.5),
+                        .letter_spacing(1.5),
                 );
+                ui.add_space(8.0);
+                ui.label(RichText::new(value).color(value_col).size(30.0).strong());
                 ui.add_space(4.0);
-                ui.label(RichText::new(value).color(value_col).size(26.0).strong());
-                ui.add_space(2.0);
-                ui.label(RichText::new(unit).color(DIM).size(11.0));
+                ui.label(RichText::new(unit.to_uppercase()).color(DIM).size(9.0).strong().letter_spacing(1.0));
             });
         });
 }
@@ -1899,24 +1882,26 @@ fn module_toggle(ui: &mut egui::Ui, name: &str, desc: &str, on: &mut bool) -> bo
 
 fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add_sized(
-        [ui.available_width().min(220.0), 42.0],
+        [ui.available_width().min(220.0), 44.0],
         egui::Button::new(
-            RichText::new(text)
+            RichText::new(text.to_uppercase())
                 .color(Color32::WHITE)
-                .size(16.0)
-                .strong(),
+                .size(13.0)
+                .strong()
+                .letter_spacing(1.5),
         )
         .fill(ACCENT)
-        .rounding(10.0),
+        .rounding(0.0),
     )
 }
 
 fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add_sized(
         [120.0, 36.0],
-        egui::Button::new(RichText::new(text).color(TEXT))
-            .fill(CARD.linear_multiply(1.2))
-            .rounding(8.0),
+        egui::Button::new(RichText::new(text.to_uppercase()).color(TEXT).size(11.0).strong().letter_spacing(1.0))
+            .fill(CARD.linear_multiply(1.5))
+            .rounding(0.0)
+            .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(30))),
     )
 }
 
