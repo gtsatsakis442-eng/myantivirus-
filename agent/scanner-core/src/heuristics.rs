@@ -46,11 +46,17 @@ struct Signals {
 
 /// Analyze a buffer, returning heuristic findings (empty for non-PE input).
 pub fn analyze(data: &[u8]) -> Vec<Detection> {
-    let pe = match PE::parse(data) {
-        Ok(pe) => pe,
-        Err(_) => return Vec::new(),
-    };
-    findings_for(&signals(&pe, data))
+    match PE::parse(data) {
+        Ok(pe) => analyze_pe(&pe, data),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Like [`analyze`] but reuses an already-parsed PE. The engine parses a file's
+/// PE structure once and shares it across the heuristic and behavioral layers,
+/// avoiding a redundant `goblin` parse of the same bytes on every scan.
+pub(crate) fn analyze_pe(pe: &PE, data: &[u8]) -> Vec<Detection> {
+    findings_for(&signals(pe, data))
 }
 
 /// Derive the structural [`Signals`] from a parsed PE.

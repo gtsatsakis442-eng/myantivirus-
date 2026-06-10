@@ -198,11 +198,6 @@ fn fetch_text(url: &str, auth: Option<&str>) -> Result<String> {
     if !url.starts_with("https://") {
         return Err(ScanError::Update(format!("refusing non-HTTPS URL: {url}")));
     }
-    let tmp = std::env::temp_dir().join(format!(
-        "talos-feed-{}-{}.tmp",
-        std::process::id(),
-        url.len()
-    ));
     let mut cmd = Command::new("curl");
     cmd.arg("-fsSL")
         // Force TLS and forbid protocol downgrade on redirects.
@@ -221,24 +216,22 @@ fn fetch_text(url: &str, auth: Option<&str>) -> Result<String> {
     if let Some(a) = auth {
         cmd.arg("-H").arg(format!("Auth-Key: {a}"));
     }
-    cmd.arg("-o").arg(&tmp).arg(url);
+    // Stream the body to stdout and capture it in memory instead of writing a
+    // predictable temp file in a world-writable dir — that path is a symlink /
+    // clobber target when the agent runs as root/SYSTEM.
+    cmd.arg(url);
 
-    let status = cmd
-        .status()
+    let output = cmd
+        .output()
         .map_err(|e| ScanError::Update(format!("curl unavailable: {e}")))?;
-    if !status.success() {
-        let _ = std::fs::remove_file(&tmp);
+    if !output.status.success() {
         return Err(ScanError::Update(format!(
             "download failed (curl exit {:?})",
-            status.code()
+            output.status.code()
         )));
     }
-    let text = std::fs::read_to_string(&tmp).map_err(|source| ScanError::Io {
-        path: tmp.clone(),
-        source,
-    })?;
-    let _ = std::fs::remove_file(&tmp);
-    Ok(text)
+    String::from_utf8(output.stdout)
+        .map_err(|_| ScanError::Update(format!("feed was not valid UTF-8: {url}")))
 }
 
 /// Parse a list of SHA-256 hashes (one per line, optional `"`/`#`), returning

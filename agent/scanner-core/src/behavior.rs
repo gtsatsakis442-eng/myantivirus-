@@ -39,12 +39,17 @@ struct Cap {
 /// Analyze a buffer, returning behavioral findings (empty for non-PE, signed,
 /// or below-threshold input).
 pub fn analyze(data: &[u8]) -> Vec<Detection> {
-    let pe = match PE::parse(data) {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
+    match PE::parse(data) {
+        Ok(pe) => analyze_pe(&pe, data),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Like [`analyze`] but reuses an already-parsed PE (shared with the heuristic
+/// layer by the engine, so a file's PE is parsed once per scan, not twice).
+pub(crate) fn analyze_pe(pe: &PE, data: &[u8]) -> Vec<Detection> {
     // Trust signed binaries — same FP discipline as the heuristic layer.
-    if crate::heuristics::is_authenticode_signed(&pe) {
+    if crate::heuristics::is_authenticode_signed(pe) {
         return Vec::new();
     }
 

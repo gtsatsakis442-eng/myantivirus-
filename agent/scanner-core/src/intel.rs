@@ -164,12 +164,10 @@ fn curl_request(
     if !url.starts_with("https://") {
         return Err(ScanError::Update(format!("refusing non-HTTPS URL: {url}")));
     }
-    let tmp = std::env::temp_dir().join(format!(
-        "talos-intel-{}-{}.tmp",
-        std::process::id(),
-        url.len()
-    ));
     let mut cmd = Command::new("curl");
+    // Stream the body to stdout (no temp file — a predictable path in a
+    // world-writable dir is a symlink / clobber target). `-w %{http_code}`
+    // appends the 3-digit status to stdout after the body; we split it off below.
     cmd.arg("-sS")
         .arg("--proto")
         .arg("=https")
@@ -178,8 +176,6 @@ fn curl_request(
         .arg("60")
         .arg("--max-filesize")
         .arg("8388608") // 8 MiB is plenty for a JSON report
-        .arg("-o")
-        .arg(&tmp)
         .arg("-w")
         .arg("%{http_code}");
     if method == "POST" {
@@ -197,15 +193,18 @@ fn curl_request(
         .output()
         .map_err(|e| ScanError::Update(format!("curl unavailable: {e}")))?;
     if !output.status.success() {
-        let _ = std::fs::remove_file(&tmp);
         return Err(ScanError::Update("network request failed".to_string()));
     }
-    let code: u16 = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse()
-        .unwrap_or(0);
-    let body = std::fs::read_to_string(&tmp).unwrap_or_default();
-    let _ = std::fs::remove_file(&tmp);
+    // stdout is `<body><http_code>` — the write-out status is exactly 3 digits
+    // appended after the body. Split it off the end.
+    let mut buf = output.stdout;
+    let code: u16 = if buf.len() >= 3 {
+        let tail = buf.split_off(buf.len() - 3);
+        String::from_utf8_lossy(&tail).trim().parse().unwrap_or(0)
+    } else {
+        0
+    };
+    let body = String::from_utf8_lossy(&buf).into_owned();
     Ok((code, body))
 }
 
