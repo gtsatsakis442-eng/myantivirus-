@@ -157,6 +157,150 @@ pub fn start_update() -> Receiver<scanner_core::UpdateReport> {
     rx
 }
 
+/// Result of an in-process firewall / web-protection action — used when no
+/// privileged agent is present and the GUI applies the change itself (which
+/// requires the GUI to be running elevated; otherwise the op reports the error).
+pub enum AdminMsg {
+    /// `blocked` is `Some(n)` when the action changes the rule/domain count
+    /// (sync / flush / clear) and `None` when it leaves it unchanged.
+    Firewall {
+        on: bool,
+        blocked: Option<usize>,
+        note: String,
+    },
+    Web {
+        on: bool,
+        blocked: Option<usize>,
+        note: String,
+    },
+    Failed(String),
+}
+
+fn spawn_admin(f: impl FnOnce() -> AdminMsg + Send + 'static) -> Receiver<AdminMsg> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx
+}
+
+/// Sync the abuse.ch Feodo C2 IP blocklist into the OS firewall (in-process).
+pub fn start_firewall_sync() -> Receiver<AdminMsg> {
+    spawn_admin(|| {
+        match scanner_core::firewall::sync_c2_blocklist(scanner_core::firewall::default_feodo_url())
+        {
+            Ok(r) => {
+                history::record(
+                    "firewall",
+                    format!(
+                        "C2 firewall sync — {}/{} rule(s) applied",
+                        r.applied, r.listed
+                    ),
+                );
+                if r.applied == 0 && r.listed > 0 {
+                    AdminMsg::Firewall {
+                        on: false,
+                        blocked: Some(0),
+                        note: format!(
+                            "Downloaded {} C2 IP(s) but applied 0 — run as Administrator/root (or install the agent).",
+                            r.listed
+                        ),
+                    }
+                } else {
+                    AdminMsg::Firewall {
+                        on: r.applied > 0,
+                        blocked: Some(r.applied),
+                        note: format!("Firewall on — {} C2 IP(s) blocked.", r.applied),
+                    }
+                }
+            }
+            Err(e) => AdminMsg::Failed(format!("Firewall sync failed: {e}")),
+        }
+    })
+}
+
+/// Remove all Talos firewall rules (in-process).
+pub fn start_firewall_flush() -> Receiver<AdminMsg> {
+    spawn_admin(|| match scanner_core::firewall::flush() {
+        Ok(()) => {
+            history::record("firewall", "Flushed all Talos firewall rules");
+            AdminMsg::Firewall {
+                on: false,
+                blocked: Some(0),
+                note: "Firewall off — all Talos rules removed.".to_string(),
+            }
+        }
+        Err(e) => AdminMsg::Failed(format!("Firewall flush failed: {e}")),
+    })
+}
+
+/// Block a single outbound IPv4 address (in-process).
+pub fn start_firewall_block(ip: String) -> Receiver<AdminMsg> {
+    spawn_admin(move || match scanner_core::firewall::block_ip(&ip) {
+        Ok(()) => {
+            history::record("firewall", format!("Blocked outbound {ip}"));
+            AdminMsg::Firewall {
+                on: true,
+                blocked: None,
+                note: format!("Blocked outbound traffic to {ip}."),
+            }
+        }
+        Err(e) => AdminMsg::Failed(format!("Block failed: {e}")),
+    })
+}
+
+/// Unblock a single outbound IPv4 address (in-process).
+pub fn start_firewall_unblock(ip: String) -> Receiver<AdminMsg> {
+    spawn_admin(move || match scanner_core::firewall::unblock_ip(&ip) {
+        Ok(()) => {
+            history::record("firewall", format!("Unblocked {ip}"));
+            AdminMsg::Firewall {
+                on: true,
+                blocked: None,
+                note: format!("Unblocked {ip}."),
+            }
+        }
+        Err(e) => AdminMsg::Failed(format!("Unblock failed: {e}")),
+    })
+}
+
+/// Sync the abuse.ch URLhaus domain blocklist into the hosts file (in-process).
+pub fn start_web_sync() -> Receiver<AdminMsg> {
+    spawn_admin(|| {
+        match scanner_core::webprotect::sync_blocklist(
+            scanner_core::webprotect::default_urlhaus_url(),
+        ) {
+            Ok(r) => {
+                history::record(
+                    "web",
+                    format!("Web protection sync — {} domain(s) sinkholed", r.domains),
+                );
+                AdminMsg::Web {
+                    on: true,
+                    blocked: Some(r.domains),
+                    note: format!("Web protection on — {} domain(s) sinkholed.", r.domains),
+                }
+            }
+            Err(e) => AdminMsg::Failed(format!("Web protection sync failed: {e}")),
+        }
+    })
+}
+
+/// Remove the Talos-managed hosts-file block section (in-process).
+pub fn start_web_clear() -> Receiver<AdminMsg> {
+    spawn_admin(|| match scanner_core::webprotect::clear() {
+        Ok(()) => {
+            history::record("web", "Cleared web protection hosts entries");
+            AdminMsg::Web {
+                on: false,
+                blocked: Some(0),
+                note: "Web protection off — hosts entries removed.".to_string(),
+            }
+        }
+        Err(e) => AdminMsg::Failed(format!("Web protection clear failed: {e}")),
+    })
+}
+
 /// Messages streamed from the background scan thread to the UI.
 pub enum ScanMsg {
     Progress {

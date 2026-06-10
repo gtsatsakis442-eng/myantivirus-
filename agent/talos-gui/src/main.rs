@@ -199,6 +199,16 @@ struct TalosApp {
 
     /// The Talos bronze-guardian emblem, lazily uploaded as a GPU texture.
     hero_tex: Option<egui::TextureHandle>,
+
+    /// In-process firewall / web-protection control, used when no privileged
+    /// agent is present. `admin_rx` carries the result of a running action;
+    /// `local_*` track state the agent would otherwise report.
+    admin_rx: Option<Receiver<engine_glue::AdminMsg>>,
+    admin_busy: bool,
+    local_fw_on: bool,
+    local_fw_blocked: usize,
+    local_web_on: bool,
+    local_web_blocked: usize,
 }
 
 impl TalosApp {
@@ -247,6 +257,12 @@ impl TalosApp {
             intel_busy: false,
             intel_rx: None,
             hero_tex: None,
+            admin_rx: None,
+            admin_busy: false,
+            local_fw_on: false,
+            local_fw_blocked: 0,
+            local_web_on: false,
+            local_web_blocked: 0,
         }
     }
 
@@ -557,7 +573,45 @@ impl TalosApp {
             }
         }
 
-        if self.scanning || self.updating || self.realtime.is_some() || self.intel_busy {
+        // Drain an in-process firewall / web-protection action (no-agent path).
+        if let Some(rx) = &self.admin_rx {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    self.admin_busy = false;
+                    self.admin_rx = None;
+                    match msg {
+                        engine_glue::AdminMsg::Firewall { on, blocked, note } => {
+                            self.local_fw_on = on;
+                            if let Some(b) = blocked {
+                                self.local_fw_blocked = b;
+                            }
+                            self.status = note;
+                        }
+                        engine_glue::AdminMsg::Web { on, blocked, note } => {
+                            self.local_web_on = on;
+                            if let Some(b) = blocked {
+                                self.local_web_blocked = b;
+                            }
+                            self.status = note;
+                        }
+                        engine_glue::AdminMsg::Failed(e) => self.status = e,
+                    }
+                    self.activity_loaded = false;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self.admin_busy = false;
+                    self.admin_rx = None;
+                }
+            }
+        }
+
+        if self.scanning
+            || self.updating
+            || self.realtime.is_some()
+            || self.intel_busy
+            || self.admin_busy
+        {
             ctx.request_repaint();
         } else {
             // Keep the agent-service indicator reasonably fresh while idle.
@@ -1062,12 +1116,18 @@ impl TalosApp {
              Windows kernel minifilter = Phase 2.",
             ModuleStatus::Active,
         );
-        // Firewall (C2 blocking) — interactive, routed through the privileged
-        // agent service (it has the OS-firewall privilege the GUI process lacks).
-        let fw = self
+        // Firewall (C2 blocking). With the privileged agent present, controls
+        // route to it over IPC; otherwise the GUI applies rules in-process
+        // (works when the app runs elevated — noted inline for the user).
+        let agent_fw = self
             .agent_status
             .as_ref()
             .map(|a| (a.firewall, a.firewall_blocked));
+        let (fw_on, fw_blocked, fw_agent) = match agent_fw {
+            Some((on, n)) => (on, n, true),
+            None => (self.local_fw_on, self.local_fw_blocked, false),
+        };
+        let busy = self.admin_busy;
         let mut toggle_fw: Option<bool> = None;
         let mut block_now = false;
         let mut unblock_now = false;
@@ -1081,29 +1141,38 @@ impl TalosApp {
                             .size(15.0)
                             .strong(),
                     );
-                    let desc = match fw {
-                        Some((_, n)) => format!(
-                            "Blocks outbound C2 traffic via the OS firewall · {n} IP(s) blocked. \
-                             Sync the abuse.ch list or block your own below."
-                        ),
-                        None => "Managed by the agent service (it has the privilege to change OS \
-                                 firewall rules). Install the agent to control the firewall here."
-                            .to_string(),
+                    let desc = if fw_agent {
+                        format!(
+                            "Blocks outbound C2 traffic via the OS firewall · {fw_blocked} IP(s) \
+                             blocked. Sync the abuse.ch list or block your own below."
+                        )
+                    } else {
+                        format!(
+                            "Blocks outbound C2 traffic via the OS firewall · {fw_blocked} IP(s) \
+                             blocked. Applied directly by this app — needs Administrator/root (or \
+                             install the agent to run it always-on)."
+                        )
                     };
                     ui.label(RichText::new(desc).color(DIM).size(12.0));
                 });
-                if let Some((on_now, _)) = fw {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let mut on = on_now;
-                        let label = if on { "On" } else { "Off" };
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut on = fw_on;
+                    let label = if busy {
+                        "…"
+                    } else if on {
+                        "On"
+                    } else {
+                        "Off"
+                    };
+                    ui.add_enabled_ui(!busy, |ui| {
                         if ui.toggle_value(&mut on, label).changed() {
                             toggle_fw = Some(on);
                         }
                     });
-                }
+                });
             });
-            if fw.is_some() {
-                ui.add_space(6.0);
+            ui.add_space(6.0);
+            ui.add_enabled_ui(!busy, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Block IP:").color(DIM).size(12.0));
                     ui.add(
@@ -1121,48 +1190,83 @@ impl TalosApp {
                         flush_now = true;
                     }
                 });
-            }
+            });
         });
         ui.add_space(8.0);
         // Apply firewall actions outside the egui closures (no nested &mut self).
         if let Some(on) = toggle_fw {
-            agent_link::set_firewall(on);
-            self.status = format!(
-                "C2 blocklist {} via the agent service.",
-                if on { "syncing" } else { "flushed" }
-            );
+            if fw_agent {
+                agent_link::set_firewall(on);
+                self.status = format!(
+                    "C2 blocklist {} via the agent service.",
+                    if on { "syncing" } else { "flushed" }
+                );
+            } else if !self.admin_busy {
+                self.admin_busy = true;
+                self.admin_rx = Some(if on {
+                    engine_glue::start_firewall_sync()
+                } else {
+                    engine_glue::start_firewall_flush()
+                });
+                self.status = if on {
+                    "Syncing C2 blocklist into the firewall…".to_string()
+                } else {
+                    "Removing Talos firewall rules…".to_string()
+                };
+            }
         }
         if block_now {
             let ip = self.firewall_ip.trim().to_string();
             if ip.is_empty() {
                 self.status = "Enter an IPv4 address to block.".to_string();
-            } else {
+            } else if fw_agent {
                 agent_link::block_ip(ip);
                 self.firewall_ip.clear();
                 self.status = "Requested outbound IP block via the agent.".to_string();
+            } else if !self.admin_busy {
+                self.admin_busy = true;
+                self.admin_rx = Some(engine_glue::start_firewall_block(ip));
+                self.firewall_ip.clear();
+                self.status = "Blocking outbound IP…".to_string();
             }
         }
         if unblock_now {
             let ip = self.firewall_ip.trim().to_string();
             if ip.is_empty() {
                 self.status = "Enter an IPv4 address to unblock.".to_string();
-            } else {
+            } else if fw_agent {
                 agent_link::unblock_ip(ip);
                 self.firewall_ip.clear();
                 self.status = "Requested outbound IP unblock via the agent.".to_string();
+            } else if !self.admin_busy {
+                self.admin_busy = true;
+                self.admin_rx = Some(engine_glue::start_firewall_unblock(ip));
+                self.firewall_ip.clear();
+                self.status = "Unblocking IP…".to_string();
             }
         }
         if flush_now {
-            agent_link::set_firewall(false);
-            self.status = "Removing all Talos firewall rules…".to_string();
+            if fw_agent {
+                agent_link::set_firewall(false);
+                self.status = "Removing all Talos firewall rules…".to_string();
+            } else if !self.admin_busy {
+                self.admin_busy = true;
+                self.admin_rx = Some(engine_glue::start_firewall_flush());
+                self.status = "Removing all Talos firewall rules…".to_string();
+            }
         }
 
-        // Web / domain protection — interactive, agent-mediated (hosts-file
-        // sinkhole of known-malicious domains from abuse.ch URLhaus).
-        let web = self
+        // Web / domain protection. Agent present → control over IPC; otherwise
+        // the GUI applies the hosts-file sinkhole in-process (needs elevation).
+        let agent_web = self
             .agent_status
             .as_ref()
             .map(|a| (a.web_protection, a.web_blocked));
+        let (web_on, web_blocked, web_agent) = match agent_web {
+            Some((on, n)) => (on, n, true),
+            None => (self.local_web_on, self.local_web_blocked, false),
+        };
+        let busy = self.admin_busy;
         let mut toggle_web: Option<bool> = None;
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
@@ -1173,35 +1277,58 @@ impl TalosApp {
                             .size(15.0)
                             .strong(),
                     );
-                    let desc = match web {
-                        Some((_, n)) => format!(
+                    let desc = if web_agent {
+                        format!(
                             "Sinkholes known-malicious domains (abuse.ch URLhaus) at the OS \
-                             resolver · {n} domain(s) blocked."
-                        ),
-                        None => "Blocks known-malicious domains via the agent service (hosts-file \
-                                 sinkhole; needs privilege). Install the agent to control it here."
-                            .to_string(),
+                             resolver · {web_blocked} domain(s) blocked."
+                        )
+                    } else {
+                        format!(
+                            "Sinkholes known-malicious domains (abuse.ch URLhaus) via the hosts \
+                             file · {web_blocked} domain(s) blocked. Applied directly by this app — \
+                             needs Administrator/root (or install the agent)."
+                        )
                     };
                     ui.label(RichText::new(desc).color(DIM).size(12.0));
                 });
-                if let Some((on_now, _)) = web {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let mut on = on_now;
-                        let label = if on { "On" } else { "Off" };
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let mut on = web_on;
+                    let label = if busy {
+                        "…"
+                    } else if on {
+                        "On"
+                    } else {
+                        "Off"
+                    };
+                    ui.add_enabled_ui(!busy, |ui| {
                         if ui.toggle_value(&mut on, label).changed() {
                             toggle_web = Some(on);
                         }
                     });
-                }
+                });
             });
         });
         ui.add_space(8.0);
         if let Some(on) = toggle_web {
-            agent_link::set_web_protection(on);
-            self.status = format!(
-                "Web protection {} via the agent service.",
-                if on { "syncing" } else { "cleared" }
-            );
+            if web_agent {
+                agent_link::set_web_protection(on);
+                self.status = format!(
+                    "Web protection {} via the agent service.",
+                    if on { "syncing" } else { "cleared" }
+                );
+            } else if !self.admin_busy {
+                self.admin_busy = true;
+                self.admin_rx = Some(if on {
+                    engine_glue::start_web_sync()
+                } else {
+                    engine_glue::start_web_clear()
+                });
+                self.status = if on {
+                    "Syncing URLhaus blocklist into the hosts file…".to_string()
+                } else {
+                    "Clearing web protection…".to_string()
+                };
+            }
         }
 
         ui.add_space(12.0);
