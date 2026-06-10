@@ -314,13 +314,19 @@ pub enum ScanMsg {
         suspicious: u64,
         ms: u64,
         bytes: u64,
+        /// True when the user stopped the scan early (partial results).
+        stopped: bool,
     },
     Failed(String),
 }
 
-/// Spawn a background scan of `targets`, returning a receiver of progress.
-pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
+/// Spawn a background scan of `targets`, returning a receiver of progress plus
+/// a stop flag — raise it (Scan view's Stop button) and the scan ends promptly
+/// with partial results.
+pub fn start_scan(targets: Vec<PathBuf>) -> (Receiver<ScanMsg>, Arc<AtomicBool>) {
     let (tx, rx) = mpsc::channel::<ScanMsg>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_scan = stop.clone();
     thread::spawn(move || {
         let cfg = TalosConfig::load();
         let (mut engine, _, _) = match load_engine() {
@@ -332,7 +338,9 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
         };
         engine.set_heuristics(cfg.heuristics);
         engine.set_behavior(cfg.behavior);
-        let scanner = Scanner::with_options(&engine, scan_options(&cfg));
+        let mut options = scan_options(&cfg);
+        options.cancel = Some(stop_scan.clone());
+        let scanner = Scanner::with_options(&engine, options);
         let mut summary = ScanSummary::default();
         let started = std::time::Instant::now();
         let mut scanned: u64 = 0;
@@ -358,6 +366,9 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
             };
 
             for target in &targets {
+                if stop_scan.load(Ordering::Relaxed) {
+                    break;
+                }
                 if target.is_dir() {
                     scanner.scan_path(target, &mut handle);
                 } else {
@@ -366,12 +377,17 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
             }
         }
 
+        let stopped = stop_scan.load(Ordering::Relaxed);
         let ms = started.elapsed().as_millis() as u64;
         history::record(
             "scan",
             format!(
-                "Scan — {} files · {} malicious · {} suspicious · {} ms",
-                summary.files_scanned, summary.malicious, summary.suspicious, ms
+                "Scan{} — {} files · {} malicious · {} suspicious · {} ms",
+                if stopped { " (stopped early)" } else { "" },
+                summary.files_scanned,
+                summary.malicious,
+                summary.suspicious,
+                ms
             ),
         );
         let _ = tx.send(ScanMsg::Done {
@@ -380,9 +396,10 @@ pub fn start_scan(targets: Vec<PathBuf>) -> Receiver<ScanMsg> {
             suspicious: summary.suspicious,
             ms,
             bytes: summary.bytes_scanned,
+            stopped,
         });
     });
-    rx
+    (rx, stop)
 }
 
 /// Events streamed from the real-time monitor thread.
