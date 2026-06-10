@@ -221,8 +221,10 @@ pub(crate) fn fetch_https(url: &str) -> Result<String> {
     if !url.starts_with("https://") {
         return Err(ScanError::Update(format!("refusing non-HTTPS URL: {url}")));
     }
-    let tmp = std::env::temp_dir().join(format!("talos-fw-{}.tmp", std::process::id()));
-    let status = Command::new("curl")
+    // Stream the body to stdout and capture it in memory instead of writing a
+    // predictable temp file in a world-writable dir — that path is a symlink /
+    // clobber target when the agent runs as root/SYSTEM.
+    let output = Command::new("curl")
         .args([
             "-fsSL",
             "--proto",
@@ -232,19 +234,14 @@ pub(crate) fn fetch_https(url: &str) -> Result<String> {
             "120",
             "--max-filesize",
             "16777216",
-            "-o",
         ])
-        .arg(&tmp)
         .arg(url)
-        .status()
+        .output()
         .map_err(|e| ScanError::Update(format!("curl unavailable: {e}")))?;
-    if !status.success() {
-        let _ = std::fs::remove_file(&tmp);
+    if !output.status.success() {
         return Err(ScanError::Update("blocklist download failed".to_string()));
     }
-    let text = std::fs::read_to_string(&tmp).unwrap_or_default();
-    let _ = std::fs::remove_file(&tmp);
-    Ok(text)
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 #[cfg(test)]

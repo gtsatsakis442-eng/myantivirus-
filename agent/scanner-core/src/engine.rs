@@ -111,13 +111,19 @@ impl Engine {
                     }
                 }
             }
-            // Static heuristics (L2) run on PE content; no-op for other files.
-            if self.heuristics {
-                detections.extend(crate::heuristics::analyze(bytes));
-            }
-            // Static behavioral capability analysis (L2.5); no-op for non-PE.
-            if self.behavior {
-                detections.extend(crate::behavior::analyze(bytes));
+            // Static heuristics (L2) and behavioral capability analysis (L2.5)
+            // both operate on a parsed PE. Parse it once and share it so a
+            // file's PE structure isn't parsed twice per scan. Non-PE input
+            // simply fails to parse, skipping both layers (a no-op, as before).
+            if self.heuristics || self.behavior {
+                if let Ok(pe) = goblin::pe::PE::parse(bytes) {
+                    if self.heuristics {
+                        detections.extend(crate::heuristics::analyze_pe(&pe, bytes));
+                    }
+                    if self.behavior {
+                        detections.extend(crate::behavior::analyze_pe(&pe, bytes));
+                    }
+                }
             }
         }
 
