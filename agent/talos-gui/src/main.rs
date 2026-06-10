@@ -83,19 +83,32 @@ fn install_theme(ctx: &egui::Context) {
     style.spacing.item_spacing = egui::vec2(12.0, 10.0);
     style.spacing.button_padding = egui::vec2(20.0, 12.0);
     style.spacing.interact_size.y = 32.0;
-    
+
     // Enterprise typography setup
     use egui::{FontFamily, FontId, TextStyle};
-    let mut font_definitions = egui::FontDefinitions::default();
-    
+    let font_definitions = egui::FontDefinitions::default();
+
     // Use system sans-serif for that clean enterprise look
     style.text_styles = [
-        (TextStyle::Heading, FontId::new(24.0, FontFamily::Proportional)),
+        (
+            TextStyle::Heading,
+            FontId::new(24.0, FontFamily::Proportional),
+        ),
         (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
-        (TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace)),
-        (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
-        (TextStyle::Small, FontId::new(11.0, FontFamily::Proportional)),
-    ].into();
+        (
+            TextStyle::Monospace,
+            FontId::new(13.0, FontFamily::Monospace),
+        ),
+        (
+            TextStyle::Button,
+            FontId::new(14.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Small,
+            FontId::new(11.0, FontFamily::Proportional),
+        ),
+    ]
+    .into();
 
     ctx.set_fonts(font_definitions);
     ctx.set_style(style);
@@ -595,8 +608,19 @@ impl TalosApp {
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(12.0);
         ui.vertical(|ui| {
-            ui.label(RichText::new("TALOS").color(ACCENT).size(22.0).strong().letter_spacing(2.0));
-            ui.label(RichText::new("SYSTEM SECURITY").color(DIM).size(10.0).strong());
+            ui.label(
+                RichText::new("TALOS")
+                    .color(ACCENT)
+                    .size(22.0)
+                    .strong()
+                    .extra_letter_spacing(2.0),
+            );
+            ui.label(
+                RichText::new("SYSTEM SECURITY")
+                    .color(DIM)
+                    .size(10.0)
+                    .strong(),
+            );
         });
         ui.add_space(24.0);
 
@@ -659,7 +683,13 @@ impl TalosApp {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("●").color(status_col).size(20.0));
-                        ui.label(RichText::new(title.to_uppercase()).color(TEXT).size(22.0).strong().letter_spacing(1.0));
+                        ui.label(
+                            RichText::new(title.to_uppercase())
+                                .color(TEXT)
+                                .size(22.0)
+                                .strong()
+                                .extra_letter_spacing(1.0),
+                        );
                     });
                     ui.add_space(2.0);
                     ui.label(RichText::new(subtitle).color(DIM).size(14.0));
@@ -1816,12 +1846,18 @@ fn stat_tile(ui: &mut egui::Ui, title: &str, value: &str, value_col: Color32, un
                         .color(DIM)
                         .size(10.0)
                         .strong()
-                        .letter_spacing(1.5),
+                        .extra_letter_spacing(1.5),
                 );
                 ui.add_space(8.0);
                 ui.label(RichText::new(value).color(value_col).size(30.0).strong());
                 ui.add_space(4.0);
-                ui.label(RichText::new(unit.to_uppercase()).color(DIM).size(9.0).strong().letter_spacing(1.0));
+                ui.label(
+                    RichText::new(unit.to_uppercase())
+                        .color(DIM)
+                        .size(9.0)
+                        .strong()
+                        .extra_letter_spacing(1.0),
+                );
             });
         });
 }
@@ -1888,7 +1924,7 @@ fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
                 .color(Color32::WHITE)
                 .size(13.0)
                 .strong()
-                .letter_spacing(1.5),
+                .extra_letter_spacing(1.5),
         )
         .fill(ACCENT)
         .rounding(0.0),
@@ -1898,10 +1934,16 @@ fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add_sized(
         [120.0, 36.0],
-        egui::Button::new(RichText::new(text.to_uppercase()).color(TEXT).size(11.0).strong().letter_spacing(1.0))
-            .fill(CARD.linear_multiply(1.5))
-            .rounding(0.0)
-            .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(30))),
+        egui::Button::new(
+            RichText::new(text.to_uppercase())
+                .color(TEXT)
+                .size(11.0)
+                .strong()
+                .extra_letter_spacing(1.0),
+        )
+        .fill(CARD.linear_multiply(1.5))
+        .rounding(0.0)
+        .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(30))),
     )
 }
 
