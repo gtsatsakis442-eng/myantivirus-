@@ -343,7 +343,10 @@ impl TalosApp {
         self.scan_label = label.to_string();
         self.scanning = true;
         self.status = format!("Running {label} scan…");
-        let (rx, stop) = engine_glue::start_scan(targets);
+        // A Full Scan is deliberately thorough and re-reads every file; Quick and
+        // Custom scans use the incremental cache to skip unchanged clean files.
+        let use_cache = label != "Full";
+        let (rx, stop) = engine_glue::start_scan(targets, use_cache);
         self.rx = Some(rx);
         self.scan_stop = Some(stop);
         self.view = View::Scan;

@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -320,16 +320,25 @@ pub enum ScanMsg {
     Failed(String),
 }
 
+/// Path to the on-demand scan cache.
+fn scan_cache_path() -> PathBuf {
+    data_dir().join("scan-cache.json")
+}
+
 /// Spawn a background scan of `targets`, returning a receiver of progress plus
 /// a stop flag — raise it (Scan view's Stop button) and the scan ends promptly
 /// with partial results.
-pub fn start_scan(targets: Vec<PathBuf>) -> (Receiver<ScanMsg>, Arc<AtomicBool>) {
+///
+/// `use_cache` enables the incremental cache (clean, unchanged files are skipped
+/// without being re-read). Quick/Custom scans pass `true`; a Full Scan passes
+/// `false` so every file is re-read.
+pub fn start_scan(targets: Vec<PathBuf>, use_cache: bool) -> (Receiver<ScanMsg>, Arc<AtomicBool>) {
     let (tx, rx) = mpsc::channel::<ScanMsg>();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_scan = stop.clone();
     thread::spawn(move || {
         let cfg = TalosConfig::load();
-        let (mut engine, _, _) = match load_engine() {
+        let (mut engine, hash_count, yara_count) = match load_engine() {
             Ok(v) => v,
             Err(e) => {
                 let _ = tx.send(ScanMsg::Failed(e));
@@ -340,6 +349,27 @@ pub fn start_scan(targets: Vec<PathBuf>) -> (Receiver<ScanMsg>, Arc<AtomicBool>)
         engine.set_behavior(cfg.behavior);
         let mut options = scan_options(&cfg);
         options.cancel = Some(stop_scan.clone());
+
+        // Incremental cache, keyed to the current definitions generation so any
+        // signature/YARA/heuristics/version change invalidates it.
+        let cache = if use_cache {
+            let generation = scanner_core::cache::definitions_generation(
+                hash_count,
+                yara_count,
+                cfg.heuristics,
+                cfg.behavior,
+                &store_dir(),
+            );
+            let path = scan_cache_path();
+            let c = Arc::new(Mutex::new(scanner_core::cache::ScanCache::load(
+                &path, generation,
+            )));
+            options.cache = Some(c.clone());
+            Some((c, path))
+        } else {
+            None
+        };
+
         let scanner = Scanner::with_options(&engine, options);
         let mut summary = ScanSummary::default();
         let started = std::time::Instant::now();
@@ -374,6 +404,13 @@ pub fn start_scan(targets: Vec<PathBuf>) -> (Receiver<ScanMsg>, Arc<AtomicBool>)
                 } else {
                     handle(scanner.scan_file(target));
                 }
+            }
+        }
+
+        // Persist the refreshed cache (best-effort) for the next scan.
+        if let Some((c, path)) = &cache {
+            if let Ok(guard) = c.lock() {
+                let _ = guard.save(path);
             }
         }
 

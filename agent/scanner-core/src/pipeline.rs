@@ -11,17 +11,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Instant, UNIX_EPOCH};
 
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
 use crate::archive::{self, ArchiveLimits};
+use crate::cache::ScanCache;
 use crate::engine::Engine;
 use crate::hashing::{hash_bytes, hash_reader, FileHashes};
 use crate::report::ScanReport;
-use crate::verdict::Detection;
+use crate::verdict::{Detection, Disposition};
 
 /// Default cap for loading a whole file into memory for content inspection.
 pub const DEFAULT_MAX_CONTENT_BYTES: u64 = 128 * 1024 * 1024; // 128 MiB
@@ -46,6 +47,10 @@ pub struct ScanOptions {
     /// scan stops promptly — traversal halts and queued files are not scanned.
     /// Files already in flight finish, so partial results stay consistent.
     pub cancel: Option<Arc<AtomicBool>>,
+    /// Optional incremental cache: clean files unchanged since a previous scan
+    /// (same size+mtime, same definitions generation) are served from here
+    /// without being re-read. Shared across worker threads.
+    pub cache: Option<Arc<Mutex<ScanCache>>>,
 }
 
 impl Default for ScanOptions {
@@ -58,6 +63,7 @@ impl Default for ScanOptions {
             exclusions: Vec::new(),
             scan_archives: true,
             cancel: None,
+            cache: None,
         }
     }
 }
@@ -133,7 +139,25 @@ impl<'e> Scanner<'e> {
             return ScanReport::skipped(path, meta.len(), start);
         }
 
-        let size = fs::metadata(path).map(|m| m.len()).unwrap_or(meta.len());
+        let (size, mtime_ns) = match fs::metadata(path) {
+            Ok(m) => (m.len(), mtime_ns(&m)),
+            Err(_) => (meta.len(), mtime_ns(&meta)),
+        };
+
+        // Incremental cache: a file unchanged (same size+mtime) since it was
+        // scanned clean under the current definitions is served without being
+        // re-read — the big win on repeat/scheduled scans.
+        if let Some(cache) = &self.options.cache {
+            if let Some(key) = path.to_str() {
+                if let Some(hashes) = cache
+                    .lock()
+                    .ok()
+                    .and_then(|c| c.get_clean(key, size, mtime_ns))
+                {
+                    return ScanReport::completed(path, size, hashes, Vec::new(), true, start);
+                }
+            }
+        }
 
         // Choose the content path (load into memory) or hash-only (stream).
         let (hashes, content_inspected, content): (FileHashes, bool, Option<Vec<u8>>) =
@@ -171,7 +195,21 @@ impl<'e> Scanner<'e> {
             }
         }
 
-        ScanReport::completed(path, size, hashes, detections, content_inspected, start)
+        let report =
+            ScanReport::completed(path, size, hashes, detections, content_inspected, start);
+
+        // Cache only clean, fully-inspected files — flagged files are always
+        // re-evaluated, and hash-only (oversized) files are not cached.
+        if report.disposition == Disposition::Clean && report.content_inspected {
+            if let (Some(cache), Some(key), Some(h)) =
+                (&self.options.cache, path.to_str(), report.hashes.as_ref())
+            {
+                if let Ok(mut c) = cache.lock() {
+                    c.put_clean(key, size, mtime_ns, h.clone());
+                }
+            }
+        }
+        report
     }
 
     /// Walk `root` recursively, invoking `sink` for each report (streaming, so
@@ -275,6 +313,16 @@ impl<'e> Scanner<'e> {
         reports.extend(scanned);
         reports
     }
+}
+
+/// Modification time of `meta` as nanoseconds since the Unix epoch (0 if
+/// unavailable), the cheap change-detector for the incremental cache.
+fn mtime_ns(meta: &fs::Metadata) -> u128 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 /// Scan each entry of a ZIP buffer and append entry-attributed detections.
@@ -418,6 +466,62 @@ mod tests {
         assert!(
             scanner.scan_tree_parallel(dir.path()).is_empty(),
             "a raised flag stops the parallel path too"
+        );
+    }
+
+    #[test]
+    fn cache_hit_short_circuits_the_real_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let evil = dir.path().join("eicar.com");
+        std::fs::write(&evil, EICAR).unwrap();
+        let meta = std::fs::metadata(&evil).unwrap();
+        let mtns = mtime_ns(&meta);
+
+        let engine = eicar_engine();
+        // Pre-seed the cache asserting this exact (size, mtime) was clean. If the
+        // scanner honours the cache it returns Clean *without* reading the file —
+        // proving the read/scan was skipped (the file is really malicious).
+        let mut cache = crate::cache::ScanCache::new(1);
+        cache.put_clean(
+            evil.to_str().unwrap(),
+            meta.len(),
+            mtns,
+            crate::hashing::hash_bytes(b"placeholder"),
+        );
+        let opts = ScanOptions {
+            cache: Some(Arc::new(Mutex::new(cache))),
+            ..Default::default()
+        };
+        let scanner = Scanner::with_options(&engine, opts);
+        assert!(
+            !scanner.scan_file(&evil).is_malicious(),
+            "a cache hit must skip the (malicious) re-scan"
+        );
+
+        // Control: with no cache the same file is really scanned and flagged.
+        assert!(Scanner::new(&engine).scan_file(&evil).is_malicious());
+    }
+
+    #[test]
+    fn clean_file_populates_then_serves_from_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let ok = dir.path().join("benign.txt");
+        std::fs::write(&ok, b"nothing to see here").unwrap();
+
+        let engine = eicar_engine();
+        let cache = Arc::new(Mutex::new(crate::cache::ScanCache::new(1)));
+        let opts = ScanOptions {
+            cache: Some(cache.clone()),
+            ..Default::default()
+        };
+        let scanner = Scanner::with_options(&engine, opts);
+
+        assert!(!scanner.scan_file(&ok).is_malicious());
+        assert_eq!(cache.lock().unwrap().len(), 1, "clean file is now cached");
+        // Second pass is a cache hit and still reports clean.
+        assert_eq!(
+            scanner.scan_file(&ok).disposition,
+            crate::Disposition::Clean
         );
     }
 
