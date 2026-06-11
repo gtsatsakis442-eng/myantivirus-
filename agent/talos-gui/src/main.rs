@@ -14,7 +14,9 @@ mod engine_glue;
 mod history;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
@@ -158,6 +160,8 @@ struct TalosApp {
     firewall_ip: String,
 
     rx: Option<Receiver<ScanMsg>>,
+    /// Raise to stop the running scan early (drives `ScanOptions::cancel`).
+    scan_stop: Option<Arc<AtomicBool>>,
     scanning: bool,
     scan_label: String,
     scanned: u64,
@@ -226,6 +230,7 @@ impl TalosApp {
             new_exclusion: String::new(),
             firewall_ip: String::new(),
             rx: None,
+            scan_stop: None,
             scanning: false,
             scan_label: String::new(),
             scanned: 0,
@@ -338,8 +343,18 @@ impl TalosApp {
         self.scan_label = label.to_string();
         self.scanning = true;
         self.status = format!("Running {label} scan…");
-        self.rx = Some(engine_glue::start_scan(targets));
+        let (rx, stop) = engine_glue::start_scan(targets);
+        self.rx = Some(rx);
+        self.scan_stop = Some(stop);
         self.view = View::Scan;
+    }
+
+    /// Request that the running scan stop (it ends promptly with partial results).
+    fn stop_scan(&mut self) {
+        if let Some(stop) = &self.scan_stop {
+            stop.store(true, Ordering::Relaxed);
+            self.status = "Stopping scan — finishing the files in flight…".to_string();
+        }
     }
 
     fn apply_advice(&mut self, a: Advice) {
@@ -409,6 +424,7 @@ impl TalosApp {
                         suspicious,
                         ms,
                         bytes,
+                        stopped,
                     }) => {
                         self.last = Some(Done {
                             files,
@@ -419,8 +435,13 @@ impl TalosApp {
                         });
                         self.last_scan_unix = now_unix();
                         self.scanning = false;
+                        let outcome = if stopped {
+                            "stopped — partial results:"
+                        } else {
+                            "complete —"
+                        };
                         self.status = format!(
-                            "{} scan complete — {malicious} malicious, {suspicious} suspicious in {files} files",
+                            "{} scan {outcome} {malicious} malicious, {suspicious} suspicious in {files} files",
                             self.scan_label
                         );
                         finished = true;
@@ -441,6 +462,7 @@ impl TalosApp {
         }
         if finished {
             self.rx = None;
+            self.scan_stop = None;
             self.refresh_inventory();
             self.activity_loaded = false;
         }
@@ -1390,6 +1412,7 @@ impl TalosApp {
         });
 
         ui.add_space(10.0);
+        let mut stop_clicked = false;
         card(ui, CARD, |ui| {
             if self.scanning {
                 ui.horizontal(|ui| {
@@ -1403,6 +1426,11 @@ impl TalosApp {
                         .color(TEXT)
                         .size(15.0),
                     );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if secondary_button(ui, "Stop").clicked() {
+                            stop_clicked = true;
+                        }
+                    });
                 });
                 ui.label(
                     RichText::new(truncate(&self.current, 80))
@@ -1426,6 +1454,9 @@ impl TalosApp {
                 ui.label(RichText::new("Choose a scan to begin.").color(DIM));
             }
         });
+        if stop_clicked {
+            self.stop_scan();
+        }
 
         if !self.threats.is_empty() {
             ui.add_space(8.0);

@@ -10,6 +10,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use rayon::prelude::*;
@@ -40,6 +42,10 @@ pub struct ScanOptions {
     pub exclusions: Vec<PathBuf>,
     /// Whether to look inside ZIP archives. Disable for faster, shallower scans.
     pub scan_archives: bool,
+    /// Cooperative cancellation: raise this flag (from another thread) and the
+    /// scan stops promptly — traversal halts and queued files are not scanned.
+    /// Files already in flight finish, so partial results stay consistent.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Default for ScanOptions {
@@ -51,6 +57,7 @@ impl Default for ScanOptions {
             threads: 0,
             exclusions: Vec::new(),
             scan_archives: true,
+            cancel: None,
         }
     }
 }
@@ -77,6 +84,14 @@ impl<'e> Scanner<'e> {
     fn is_excluded(&self, path: &Path) -> bool {
         let ex = &self.options.exclusions;
         !ex.is_empty() && ex.iter().any(|e| path == e || path.starts_with(e))
+    }
+
+    /// True when a caller-provided cancel flag has been raised.
+    fn cancelled(&self) -> bool {
+        self.options
+            .cancel
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::Relaxed))
     }
 
     /// Scan a single path. Always returns a report (never panics).
@@ -167,6 +182,9 @@ impl<'e> Scanner<'e> {
             walker = walker.max_depth(depth);
         }
         for entry in walker.into_iter() {
+            if self.cancelled() {
+                break;
+            }
             match entry {
                 Ok(e) => {
                     if e.file_type().is_dir() {
@@ -207,6 +225,9 @@ impl<'e> Scanner<'e> {
         let mut files: Vec<PathBuf> = Vec::new();
         let mut reports: Vec<ScanReport> = Vec::new();
         for entry in walker.into_iter() {
+            if self.cancelled() {
+                break;
+            }
             match entry {
                 Ok(e) => {
                     if !e.file_type().is_dir() {
@@ -224,10 +245,12 @@ impl<'e> Scanner<'e> {
         }
 
         // One reusable YARA scanner per worker thread (via `map_init`) — this is
-        // what makes bulk scans fast: no per-file scanner construction.
+        // what makes bulk scans fast: no per-file scanner construction. Once the
+        // cancel flag is raised, remaining queued files are filtered out.
         let scan = || -> Vec<ScanReport> {
             files
                 .par_iter()
+                .filter(|_| !self.cancelled())
                 .map_init(
                     || self.engine.new_yara_scanner(),
                     |scanner, path| self.scan_file_with(path, scanner.as_mut()),
@@ -373,6 +396,29 @@ mod tests {
             "an excluded file must not be flagged"
         );
         assert_eq!(report.disposition, crate::Disposition::Skipped);
+    }
+
+    #[test]
+    fn cancel_flag_stops_the_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..32 {
+            std::fs::write(dir.path().join(format!("f{i}.txt")), b"data").unwrap();
+        }
+        let engine = eicar_engine();
+        let cancel = Arc::new(AtomicBool::new(true)); // raised before the scan starts
+        let opts = ScanOptions {
+            cancel: Some(cancel),
+            ..Default::default()
+        };
+        let scanner = Scanner::with_options(&engine, opts);
+
+        let mut streamed = 0;
+        scanner.scan_path(dir.path(), |_| streamed += 1);
+        assert_eq!(streamed, 0, "a raised flag stops streaming traversal");
+        assert!(
+            scanner.scan_tree_parallel(dir.path()).is_empty(),
+            "a raised flag stops the parallel path too"
+        );
     }
 
     #[test]
