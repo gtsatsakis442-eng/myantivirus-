@@ -453,38 +453,65 @@ impl Shared {
         std::thread::spawn(move || {
             use scanner_core::firewall;
             if on {
-                match firewall::sync_c2_blocklist(firewall::default_feodo_url()) {
+                // Step 1: apply baseline port blocks immediately — no network
+                // needed, instant protection against Metasploit/Tor/XMRig/etc.
+                let baseline_ports = match firewall::apply_baseline() {
+                    Ok(r) => r.applied,
+                    Err(e) => {
+                        me.push_event(
+                            severity::ERROR,
+                            format!("firewall baseline (needs root/admin): {e}"),
+                            None,
+                        );
+                        0
+                    }
+                };
+
+                // Step 2: sync all four threat feeds (Feodo C2 ×2 + Spamhaus
+                // DROP/EDROP) and merge them into one atomic rule set.
+                match firewall::sync_all_feeds() {
                     Ok(report) => {
                         me.firewall_on.store(true, Ordering::Relaxed);
-                        me.firewall_blocked
-                            .fetch_add(report.applied, Ordering::Relaxed);
+                        me.firewall_blocked.store(report.applied, Ordering::Relaxed);
                         me.push_event(
                             severity::INFO,
                             format!(
-                                "firewall: synced C2 blocklist — {} IP(s) blocked",
-                                report.applied
+                                "firewall enabled: {baseline_ports} port rule(s) + \
+                                 {} IP/CIDR block(s) across {} feed(s)",
+                                report.applied,
+                                scanner_core::KNOWN_FEEDS.len(),
                             ),
                             None,
                         );
+                        for msg in &report.messages {
+                            me.push_event(severity::INFO, format!("  {msg}"), None);
+                        }
                     }
-                    Err(e) => {
-                        me.push_event(severity::ERROR, format!("firewall sync failed: {e}"), None)
-                    }
+                    Err(e) => me.push_event(
+                        severity::ERROR,
+                        format!("firewall feed sync failed: {e}"),
+                        None,
+                    ),
                 }
             } else {
+                // Tear down: baseline chain first, then the feed chain and all
+                // manual per-IP rules.
+                let _ = firewall::flush_baseline();
                 match firewall::flush() {
                     Ok(()) => {
                         me.firewall_on.store(false, Ordering::Relaxed);
                         me.firewall_blocked.store(0, Ordering::Relaxed);
                         me.push_event(
                             severity::INFO,
-                            "firewall: all Talos rules removed".to_string(),
+                            "firewall disabled: all Talos rules removed".to_string(),
                             None,
                         );
                     }
-                    Err(e) => {
-                        me.push_event(severity::ERROR, format!("firewall flush failed: {e}"), None)
-                    }
+                    Err(e) => me.push_event(
+                        severity::ERROR,
+                        format!("firewall flush failed: {e}"),
+                        None,
+                    ),
                 }
             }
         });
