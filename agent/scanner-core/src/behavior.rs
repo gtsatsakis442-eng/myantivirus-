@@ -59,7 +59,11 @@ pub(crate) fn analyze_pe(pe: &PE, data: &[u8]) -> Vec<Detection> {
         .map(|i| i.name.to_ascii_lowercase())
         .collect();
     let hay = behavioral_haystack(data);
-    detections_from(&imports, &hay, imports.len())
+    let mut detections = detections_from(&imports, &hay, imports.len());
+    // LOLBin guard: detect Living-off-the-Land Binary abuse patterns embedded
+    // in the file's strings (e.g. a dropper that shells out to certutil/mshta).
+    detections.extend(crate::lolbin::analyze(&hay));
+    detections
 }
 
 /// Match capabilities, apply the score threshold, and map to detections. Kept
