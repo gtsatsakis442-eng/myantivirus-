@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 const CHUNK: usize = 64 * 1024;
 
 /// The set of digests computed for a file, as lowercase hex strings.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FileHashes {
     pub md5: String,
     pub sha1: String,

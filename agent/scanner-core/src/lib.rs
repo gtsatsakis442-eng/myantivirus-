@@ -28,6 +28,7 @@
 pub mod archive;
 pub mod behavior;
 pub mod bootstrap;
+pub mod cache;
 pub mod engine;
 pub mod error;
 pub mod feeds;
@@ -46,6 +47,7 @@ pub mod webprotect;
 pub mod yara_engine;
 
 pub use archive::ArchiveLimits;
+pub use cache::ScanCache;
 pub use engine::Engine;
 pub use error::{Result, ScanError};
 pub use feeds::{UpdateOptions, UpdateReport};
