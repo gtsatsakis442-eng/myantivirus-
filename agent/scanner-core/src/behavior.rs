@@ -278,6 +278,74 @@ fn match_capabilities(imports: &[String], hay: &str, import_count: usize) -> Vec
         });
     }
 
+    // Inhibit system recovery: shadow-copy / backup destruction (ransomware).
+    if any_s(&[
+        "vssadmin delete shadows",
+        "wmic shadowcopy delete",
+        "wbadmin delete catalog",
+        "bcdedit /set {default} recoveryenabled no",
+    ]) {
+        caps.push(Cap {
+            name: "Behavior.InhibitRecovery",
+            mitre: "T1490",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // Defense evasion: disabling Microsoft Defender / AV services.
+    if any_s(&[
+        "disablerealtimemonitoring",
+        "stop-service windefend",
+        "sc stop windefend",
+        "disableantispyware",
+    ]) {
+        caps.push(Cap {
+            name: "Behavior.DefenseEvasion.DisableAv",
+            mitre: "T1562.001",
+            severity: Severity::High,
+            weight: 2,
+        });
+    }
+
+    // Lateral movement: remote service / admin-share execution.
+    if any_imp(&["wnetaddconnection2", "netuseradd"])
+        || any_s(&["\\admin$", "psexec", "wmic /node:", "winrs "])
+    {
+        caps.push(Cap {
+            name: "Behavior.LateralMovement",
+            mitre: "T1021",
+            severity: Severity::Medium,
+            weight: 2,
+        });
+    }
+
+    // Credential access: theft of browser-stored credentials.
+    if any_s(&[
+        "\\chrome\\user data",
+        "\\microsoft\\edge\\user data",
+        "moz_logins",
+        "logins.json",
+        "vaultcli",
+    ]) {
+        caps.push(Cap {
+            name: "Behavior.CredentialAccess.Browsers",
+            mitre: "T1555.003",
+            severity: Severity::High,
+            weight: 2,
+        });
+    }
+
+    // Collection: GDI screen capture.
+    if imp("bitblt") && any_imp(&["getdc", "getdesktopwindow", "createcompatiblebitmap"]) {
+        caps.push(Cap {
+            name: "Behavior.Collection.ScreenCapture",
+            mitre: "T1113",
+            severity: Severity::Low,
+            weight: 1,
+        });
+    }
+
     caps
 }
 
@@ -337,6 +405,30 @@ mod tests {
     #[test]
     fn non_pe_is_empty() {
         assert!(analyze(b"not a PE file").is_empty());
+    }
+
+    #[test]
+    fn inhibit_recovery_alone_is_reported() {
+        // T1490 is a strong standalone ransomware/wiper signal (weight 3).
+        let d = detections_from(&[], "running vssadmin delete shadows /all /quiet now", 0);
+        assert!(d
+            .iter()
+            .any(|x| x.name.starts_with("Behavior.InhibitRecovery")));
+    }
+
+    #[test]
+    fn disable_av_and_lateral_movement_corroborate() {
+        // Disable-AV (2) + lateral movement via admin share (2) = 4 ≥ threshold.
+        let imps = imports(&["wnetaddconnection2w"]); // lowercased, as analyze_pe yields
+        let d = detections_from(
+            &imps,
+            "set-mppreference -disablerealtimemonitoring $true",
+            imps.len(),
+        );
+        assert!(d.iter().any(|x| x.name.contains("DisableAv")));
+        assert!(d
+            .iter()
+            .any(|x| x.name.starts_with("Behavior.LateralMovement")));
     }
 
     #[test]
