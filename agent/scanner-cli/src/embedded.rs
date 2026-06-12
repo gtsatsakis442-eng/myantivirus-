@@ -27,4 +27,8 @@ pub const YARA_RULES: &[(&str, &str)] = &[
         "powershell.yar",
         include_str!("../../../signatures/yara/powershell.yar"),
     ),
+    (
+        "offensive_tooling.yar",
+        include_str!("../../../signatures/yara/offensive_tooling.yar"),
+    ),
 ];

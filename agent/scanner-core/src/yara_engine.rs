@@ -218,4 +218,52 @@ rule Eicar_Test_File {
         let err = YaraEngine::from_sources([("bad", "rule X { condition: nonsense_token }")]);
         assert!(matches!(err, Err(ScanError::Yara(_))));
     }
+
+    /// The shipped offensive-tooling ruleset must compile and be precise:
+    /// hallmark tradecraft is flagged, but single passing mentions and
+    /// non-executable documents are not.
+    #[test]
+    fn offensive_ruleset_compiles_and_is_precise() {
+        const OFFENSIVE: &str = include_str!("../../../signatures/yara/offensive_tooling.yar");
+        let e = YaraEngine::from_sources([("offensive", OFFENSIVE)]).unwrap();
+        let hit = |data: &[u8], rule: &str| e.scan(data).unwrap().iter().any(|h| h.name == rule);
+
+        // Mimikatz: two distinct module strings → critical.
+        assert!(hit(
+            b"...sekurlsa::logonpasswords... privilege::debug...",
+            "Mimikatz_Credential_Tool"
+        ));
+        // A single passing mention is not enough (precision).
+        assert!(!hit(
+            b"the mimikatz tool is discussed here",
+            "Mimikatz_Credential_Tool"
+        ));
+
+        // Command-based tradecraft.
+        assert!(hit(
+            b"vssadmin delete shadows /all /quiet",
+            "Ransomware_Inhibit_Recovery"
+        ));
+        assert!(hit(
+            b"Set-MpPreference -DisableRealtimeMonitoring $true",
+            "DefenseEvasion_Disable_Defender"
+        ));
+        assert!(hit(
+            b"wevtutil cl Security",
+            "DefenseEvasion_Clear_Windows_Logs"
+        ));
+
+        // Cobalt Strike requires a PE header — a doc naming the pipe is ignored…
+        assert!(!hit(
+            b"the default pipe is \\\\.\\pipe\\MSSE-1234",
+            "CobaltStrike_Beacon"
+        ));
+        // …but the same indicator inside a PE is flagged.
+        let mut pe = vec![b'M', b'Z'];
+        pe.extend_from_slice(b"....\\\\.\\pipe\\MSSE-9999....");
+        assert!(hit(&pe, "CobaltStrike_Beacon"));
+
+        // Benign content stays clean.
+        assert!(e.scan(b"just a normal text file").unwrap().is_empty());
+    }
 }
