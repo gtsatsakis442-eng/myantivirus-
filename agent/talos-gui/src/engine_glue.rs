@@ -188,34 +188,47 @@ fn spawn_admin(f: impl FnOnce() -> AdminMsg + Send + 'static) -> Receiver<AdminM
     rx
 }
 
-/// Sync the abuse.ch Feodo C2 IP blocklist into the OS firewall (in-process).
+/// Enable the firewall: apply baseline port blocks then sync all four threat
+/// feeds (Feodo C2 ×2 + Spamhaus DROP/EDROP) into the OS firewall.
 pub fn start_firewall_sync() -> Receiver<AdminMsg> {
     spawn_admin(|| {
-        match scanner_core::firewall::sync_c2_blocklist(scanner_core::firewall::default_feodo_url())
-        {
+        use scanner_core::firewall;
+
+        // Baseline port blocks first — instant, no network, covers Metasploit /
+        // Back Orifice / Tor / XMRig mining / IRC C2 / NetBus ports.
+        let baseline_ports = match firewall::apply_baseline() {
+            Ok(r) => r.applied,
+            Err(_) => 0, // needs root/admin; feed sync will show the real error
+        };
+
+        // Sync all four feeds and merge into one atomic rule set.
+        match firewall::sync_all_feeds() {
             Ok(r) => {
+                let note = if r.applied == 0 && r.listed > 0 {
+                    format!(
+                        "Firewall: downloaded {} target(s) but applied 0 — \
+                         run as Administrator/root (or install the agent service).",
+                        r.listed
+                    )
+                } else {
+                    format!(
+                        "Firewall on — {baseline_ports} port rule(s) + \
+                         {} IP/CIDR block(s) across {} feed(s).",
+                        r.applied,
+                        scanner_core::KNOWN_FEEDS.len(),
+                    )
+                };
                 history::record(
                     "firewall",
                     format!(
-                        "C2 firewall sync — {}/{} rule(s) applied",
-                        r.applied, r.listed
+                        "Firewall enabled: {baseline_ports} port rules + {} IP/CIDR blocks",
+                        r.applied
                     ),
                 );
-                if r.applied == 0 && r.listed > 0 {
-                    AdminMsg::Firewall {
-                        on: false,
-                        blocked: Some(0),
-                        note: format!(
-                            "Downloaded {} C2 IP(s) but applied 0 — run as Administrator/root (or install the agent).",
-                            r.listed
-                        ),
-                    }
-                } else {
-                    AdminMsg::Firewall {
-                        on: r.applied > 0,
-                        blocked: Some(r.applied),
-                        note: format!("Firewall on — {} C2 IP(s) blocked.", r.applied),
-                    }
+                AdminMsg::Firewall {
+                    on: baseline_ports > 0 || r.applied > 0,
+                    blocked: Some(r.applied),
+                    note,
                 }
             }
             Err(e) => AdminMsg::Failed(format!("Firewall sync failed: {e}")),
@@ -223,18 +236,22 @@ pub fn start_firewall_sync() -> Receiver<AdminMsg> {
     })
 }
 
-/// Remove all Talos firewall rules (in-process).
+/// Disable the firewall: remove baseline chain + feed chain + all manual rules.
 pub fn start_firewall_flush() -> Receiver<AdminMsg> {
-    spawn_admin(|| match scanner_core::firewall::flush() {
-        Ok(()) => {
-            history::record("firewall", "Flushed all Talos firewall rules");
-            AdminMsg::Firewall {
-                on: false,
-                blocked: Some(0),
-                note: "Firewall off — all Talos rules removed.".to_string(),
+    spawn_admin(|| {
+        use scanner_core::firewall;
+        let _ = firewall::flush_baseline();
+        match firewall::flush() {
+            Ok(()) => {
+                history::record("firewall", "Flushed all Talos firewall rules");
+                AdminMsg::Firewall {
+                    on: false,
+                    blocked: Some(0),
+                    note: "Firewall off — all Talos rules removed.".to_string(),
+                }
             }
+            Err(e) => AdminMsg::Failed(format!("Firewall flush failed: {e}")),
         }
-        Err(e) => AdminMsg::Failed(format!("Firewall flush failed: {e}")),
     })
 }
 
