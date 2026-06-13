@@ -46,6 +46,7 @@ pub mod realtime;
 pub mod remediation;
 pub mod report;
 pub mod signatures;
+pub mod telemetry;
 pub mod trust;
 pub mod trust_service;
 pub mod verdict;
@@ -74,6 +75,7 @@ pub use remediation::{
 };
 pub use report::{ScanReport, ScanSummary};
 pub use signatures::HashSignatureDb;
+pub use telemetry::{FileMetadata, TelemetryEngine, TelemetryRecord, TelemetrySink, VerdictStatus};
 pub use trust::{
     AuthenticodeVerifier, CertInfo, NullVerifier, PortableVerifier, SignatureStatus, TrustVerifier,
 };

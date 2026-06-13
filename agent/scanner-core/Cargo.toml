@@ -23,6 +23,9 @@ goblin = "0.10.7"
 zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
 rayon = "1.12.0"
 notify = "6"
+# Embedded transactional store for the ML telemetry engine (Module 3). Bundled
+# so it compiles without a system libsqlite3 on Linux CI and the Windows MSVC build.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

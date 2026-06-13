@@ -33,6 +33,10 @@ pub enum ScanError {
     /// A signature update (feed fetch / parse) failed.
     #[error("update error: {0}")]
     Update(String),
+
+    /// A telemetry-store operation (open / schema / persist / query) failed.
+    #[error("telemetry error: {0}")]
+    Telemetry(String),
 }
 
 /// Convenience result alias used throughout the engine.
