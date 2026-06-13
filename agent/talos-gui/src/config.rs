@@ -57,6 +57,10 @@ pub struct TalosConfig {
     /// Bring web/domain protection (URLhaus hosts-file sinkhole) up
     /// automatically when the agent starts.
     pub web_autostart: bool,
+    /// User-defined TCP ports to block outbound (persisted custom rules).
+    pub custom_blocked_ports: Vec<u16>,
+    /// User-defined IP addresses or CIDRs to block outbound (persisted custom rules).
+    pub custom_blocked_ips: Vec<String>,
 }
 
 impl Default for TalosConfig {
@@ -73,6 +77,8 @@ impl Default for TalosConfig {
             schedule: Schedule::Off,
             firewall_autostart: true,
             web_autostart: true,
+            custom_blocked_ports: Vec::new(),
+            custom_blocked_ips: Vec::new(),
         }
     }
 }
