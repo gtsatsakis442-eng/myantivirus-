@@ -14,10 +14,12 @@
 //!  * **CIDR-block support** — the parser and OS drivers accept `1.2.3.0/24`
 //!    targets in addition to single hosts; iptables and netsh both support
 //!    subnet notation natively.
-//!  * **Baseline port blocking** — `apply_baseline()` instantly blocks a
+//!  * **Predefined baseline blocking** — `apply_baseline()` instantly blocks a
 //!    curated set of TCP ports used exclusively by known malware (Metasploit
-//!    meterpreter, Back Orifice, NetBus, IRC C2, Tor proxies, XMRig miners).
-//!    No network access required; idempotent.
+//!    meterpreter, Quasar/njRAT/AsyncRAT, Back Orifice, NetBus, IRC C2, Tor
+//!    proxies, XMRig miners) **and** a small set of hardcoded malicious IPs
+//!    (the Tor directory authorities). No network access required; idempotent —
+//!    this is the offline floor that protects an endpoint before any feed syncs.
 //!  * **Public-routability guard** — retained from before and extended to CIDR
 //!    targets; a poisoned feed can never add a rule that severs RFC-1918,
 //!    loopback, link-local, CGNAT, multicast, or documentation space.
@@ -118,16 +120,44 @@ pub const KNOWN_FEEDS: &[FeedConfig] = &[
 pub const BASELINE_PORTS: &[(u16, &str)] = &[
     (1337, "tcp"),   // classic "leet" backdoor convention
     (4444, "tcp"),   // Metasploit meterpreter default listener
+    (4782, "tcp"),   // Quasar RAT default
+    (5552, "tcp"),   // njRAT default
+    (6606, "tcp"),   // AsyncRAT default
+    (6666, "tcp"),   // IRC botnet C2 (alt)
     (6667, "tcp"),   // IRC botnet C2 (plaintext)
     (6697, "tcp"),   // IRC botnet C2 (TLS)
+    (7707, "tcp"),   // AsyncRAT default (alt)
+    (8808, "tcp"),   // AsyncRAT default (alt)
     (9001, "tcp"),   // Tor ORPort — anonymised C2 relay
     (9030, "tcp"),   // Tor DirPort
     (9050, "tcp"),   // Tor SOCKS proxy
+    (9051, "tcp"),   // Tor control port (remote = covert control)
     (9150, "tcp"),   // Tor Browser SOCKS proxy
     (12345, "tcp"),  // NetBus RAT
     (31337, "tcp"),  // Back Orifice RAT ("elite")
     (14444, "tcp"),  // XMRig Monero mining HTTP
     (14433, "tcp"),  // XMRig Monero mining HTTPS
+];
+
+/// Hardcoded malicious IPs blocked offline by the baseline — no feed download
+/// required, takes effect instantly at boot.
+///
+/// Currently the **Tor directory authorities**: a small, well-documented,
+/// long-lived set of hosts published in the Tor source (`auth_dirs.inc`) whose
+/// sole role is bootstrapping a client into the Tor network. Blocking them —
+/// together with the Tor TCP ports in [`BASELINE_PORTS`] — denies Tor-based C2
+/// and data exfiltration on a managed endpoint without waiting for any feed.
+/// This mirrors a standard enterprise-EDR control and is consistent with the
+/// product's existing Tor-port posture.
+pub const BASELINE_BLOCKS: &[(&str, &str)] = &[
+    ("128.31.0.34", "Tor dir-auth moria1"),
+    ("86.59.21.38", "Tor dir-auth tor26"),
+    ("45.66.33.45", "Tor dir-auth dizum"),
+    ("131.188.40.189", "Tor dir-auth gabelmoo"),
+    ("193.23.244.244", "Tor dir-auth dannenberg"),
+    ("171.25.193.9", "Tor dir-auth maatuska"),
+    ("199.58.81.140", "Tor dir-auth longclaw"),
+    ("204.13.164.118", "Tor dir-auth bastet"),
 ];
 
 /// Default Feodo Tracker URL (kept for backward compatibility).
@@ -197,21 +227,23 @@ pub fn sync_all_feeds() -> Result<FirewallReport> {
     Ok(report)
 }
 
-/// Apply the hardcoded [`BASELINE_PORTS`] as outbound TCP drop rules.
+/// Apply the hardcoded [`BASELINE_PORTS`] and [`BASELINE_BLOCKS`] as outbound
+/// drop rules. No network access required; takes effect instantly.
 ///
-/// Idempotent: existing baseline rules are torn down first. Returns the number
-/// of port rules applied.
+/// Idempotent: existing baseline rules are torn down first. Returns the total
+/// number of baseline rules applied (ports + IPs).
 pub fn apply_baseline() -> Result<FirewallReport> {
     if cfg!(windows) {
-        // Remove any previous baseline, then add one rule per port.
+        // Remove any previous baseline (wildcard, so per-port rules are caught),
+        // then add one rule per port plus one batched rule for the IP blocks.
         let _ = run(
-            "netsh",
+            "powershell",
             &argv(&[
-                "advfirewall",
-                "firewall",
-                "delete",
-                "rule",
-                &format!("name={TAG}-baseline"),
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "Get-NetFirewallRule -DisplayName '{TAG}-baseline*' | Remove-NetFirewallRule"
+                ),
             ]),
         );
         for (port, proto) in BASELINE_PORTS {
@@ -227,6 +259,26 @@ pub fn apply_baseline() -> Result<FirewallReport> {
                     "action=block",
                     &format!("protocol={proto}"),
                     &format!("remoteport={port}"),
+                ]),
+            )?;
+        }
+        if !BASELINE_BLOCKS.is_empty() {
+            let ips = BASELINE_BLOCKS
+                .iter()
+                .map(|(ip, _)| *ip)
+                .collect::<Vec<_>>()
+                .join(",");
+            run(
+                "netsh",
+                &argv(&[
+                    "advfirewall",
+                    "firewall",
+                    "add",
+                    "rule",
+                    &format!("name={TAG}-baseline-ips"),
+                    "dir=out",
+                    "action=block",
+                    &format!("remoteip={ips}"),
                 ]),
             )?;
         }
@@ -264,13 +316,32 @@ pub fn apply_baseline() -> Result<FirewallReport> {
                 ]),
             )?;
         }
+        for (ip, _label) in BASELINE_BLOCKS {
+            run(
+                "iptables",
+                &argv(&[
+                    "-A",
+                    BASELINE_CHAIN,
+                    "-d",
+                    ip,
+                    "-m",
+                    "comment",
+                    "--comment",
+                    &format!("{TAG}-baseline"),
+                    "-j",
+                    "DROP",
+                ]),
+            )?;
+        }
     }
 
-    let n = BASELINE_PORTS.len();
+    let ports = BASELINE_PORTS.len();
+    let ips = BASELINE_BLOCKS.len();
     Ok(FirewallReport {
-        applied: n,
+        applied: ports + ips,
         messages: vec![format!(
-            "Baseline: {n} TCP port(s) blocked (RAT/C2/Tor/mining defaults)"
+            "Baseline: {ports} TCP port(s) + {ips} malicious IP(s) blocked \
+             (RAT/C2/Tor/mining defaults)"
         )],
         ..Default::default()
     })
@@ -605,7 +676,7 @@ fn parse_cidr_list(text: &str) -> Vec<String> {
         }
         // Token before the first `;` or whitespace is the CIDR.
         let token = line
-            .split(|c| c == ';' || c == '#')
+            .split([';', '#'])
             .next()
             .unwrap_or("")
             .trim();
@@ -845,6 +916,24 @@ mod tests {
         assert!(ports.contains(&6667), "IRC C2 port");
         assert!(ports.contains(&9050), "Tor SOCKS port");
         assert!(ports.contains(&14444), "XMRig mining port");
+        assert!(ports.contains(&5552), "njRAT default port");
+        assert!(ports.contains(&6606), "AsyncRAT default port");
+        assert!(ports.contains(&4782), "Quasar RAT default port");
+    }
+
+    #[test]
+    fn baseline_blocks_are_public_ipv4_and_routable() {
+        // Every predefined IP block must be a valid, publicly-routable IPv4 so
+        // the OS driver accepts it and the routability guard would too — a
+        // typo'd or reserved address here would silently block a LAN host.
+        assert!(!BASELINE_BLOCKS.is_empty(), "ship at least one baseline IP");
+        for (ip, label) in BASELINE_BLOCKS {
+            assert!(is_ipv4(ip), "{label}: {ip} is not a valid IPv4");
+            assert!(
+                target_is_public(ip),
+                "{label}: {ip} is not publicly routable"
+            );
+        }
     }
 
     #[test]

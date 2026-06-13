@@ -54,7 +54,9 @@ pub use engine::Engine;
 pub use error::{Result, ScanError};
 pub use event_log::{EventLog, SiemEvent};
 pub use feeds::{UpdateOptions, UpdateReport};
-pub use firewall::{FirewallReport, FeedConfig, FeedFormat, KNOWN_FEEDS, BASELINE_PORTS};
+pub use firewall::{
+    FirewallReport, FeedConfig, FeedFormat, KNOWN_FEEDS, BASELINE_PORTS, BASELINE_BLOCKS,
+};
 pub use hashing::{hash_bytes, hash_reader, FileHashes};
 pub use intel::{lookup_hash, IntelReport};
 pub use lolbin::analyze as analyze_lolbins;

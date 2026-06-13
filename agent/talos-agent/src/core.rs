@@ -453,31 +453,38 @@ impl Shared {
         std::thread::spawn(move || {
             use scanner_core::firewall;
             if on {
-                // Step 1: apply baseline port blocks immediately — no network
-                // needed, instant protection against Metasploit/Tor/XMRig/etc.
-                let baseline_ports = match firewall::apply_baseline() {
-                    Ok(r) => r.applied,
+                // Step 1: apply the predefined baseline immediately — no network
+                // needed. Blocks malware-default TCP ports (Metasploit, RATs,
+                // Tor, XMRig) and known-malicious IPs (Tor directory authorities).
+                let baseline = match firewall::apply_baseline() {
+                    Ok(r) => r,
                     Err(e) => {
                         me.push_event(
                             severity::ERROR,
                             format!("firewall baseline (needs root/admin): {e}"),
                             None,
                         );
-                        0
+                        scanner_core::FirewallReport::default()
                     }
                 };
+                for msg in &baseline.messages {
+                    me.push_event(severity::INFO, format!("  {msg}"), None);
+                }
 
                 // Step 2: sync all four threat feeds (Feodo C2 ×2 + Spamhaus
                 // DROP/EDROP) and merge them into one atomic rule set.
                 match firewall::sync_all_feeds() {
                     Ok(report) => {
                         me.firewall_on.store(true, Ordering::Relaxed);
-                        me.firewall_blocked.store(report.applied, Ordering::Relaxed);
+                        // Surface both the offline baseline and live feed totals.
+                        me.firewall_blocked
+                            .store(baseline.applied + report.applied, Ordering::Relaxed);
                         me.push_event(
                             severity::INFO,
                             format!(
-                                "firewall enabled: {baseline_ports} port rule(s) + \
+                                "firewall enabled: {} baseline rule(s) + \
                                  {} IP/CIDR block(s) across {} feed(s)",
+                                baseline.applied,
                                 report.applied,
                                 scanner_core::KNOWN_FEEDS.len(),
                             ),
@@ -487,11 +494,16 @@ impl Shared {
                             me.push_event(severity::INFO, format!("  {msg}"), None);
                         }
                     }
-                    Err(e) => me.push_event(
-                        severity::ERROR,
-                        format!("firewall feed sync failed: {e}"),
-                        None,
-                    ),
+                    Err(e) => {
+                        // Feeds failed (likely offline), but the baseline is live.
+                        me.firewall_on.store(true, Ordering::Relaxed);
+                        me.firewall_blocked.store(baseline.applied, Ordering::Relaxed);
+                        me.push_event(
+                            severity::ERROR,
+                            format!("firewall feed sync failed (baseline active): {e}"),
+                            None,
+                        );
+                    }
                 }
             } else {
                 // Tear down: baseline chain first, then the feed chain and all

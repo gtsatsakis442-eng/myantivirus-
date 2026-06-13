@@ -51,6 +51,12 @@ pub struct TalosConfig {
     pub dark_theme: bool,
     /// Scheduled-scan cadence.
     pub schedule: Schedule,
+    /// Bring the OS-firewall protection up automatically when the agent starts
+    /// (baseline malware ports + IPs, plus the threat-intel IP feeds).
+    pub firewall_autostart: bool,
+    /// Bring web/domain protection (URLhaus hosts-file sinkhole) up
+    /// automatically when the agent starts.
+    pub web_autostart: bool,
 }
 
 impl Default for TalosConfig {
@@ -65,6 +71,8 @@ impl Default for TalosConfig {
             exclusions: Vec::new(),
             dark_theme: true,
             schedule: Schedule::Off,
+            firewall_autostart: true,
+            web_autostart: true,
         }
     }
 }
