@@ -41,10 +41,13 @@ pub mod lolbin;
 pub mod pipeline;
 pub mod quarantine;
 pub mod ransom_guard;
+pub mod ratelimit;
 pub mod realtime;
 pub mod remediation;
 pub mod report;
 pub mod signatures;
+pub mod trust;
+pub mod trust_service;
 pub mod verdict;
 pub mod webprotect;
 pub mod yara_engine;
@@ -63,6 +66,7 @@ pub use intel::{lookup_hash, IntelReport};
 pub use lolbin::analyze as analyze_lolbins;
 pub use pipeline::{ScanOptions, Scanner, DEFAULT_MAX_CONTENT_BYTES};
 pub use quarantine::{Quarantine, QuarantineEntry};
+pub use ratelimit::TokenBucket;
 pub use realtime::Watch;
 pub use remediation::{
     BaselineEntry, ContextRisk, ModuleIdentity, ProcessContext, Remediation, TrustBaseline,
@@ -70,5 +74,9 @@ pub use remediation::{
 };
 pub use report::{ScanReport, ScanSummary};
 pub use signatures::HashSignatureDb;
+pub use trust::{
+    AuthenticodeVerifier, CertInfo, NullVerifier, PortableVerifier, SignatureStatus, TrustVerifier,
+};
+pub use trust_service::{IntelSummary, LocalFallback, TrustOutcome, TrustPolicy, TrustService};
 pub use verdict::{Detection, DetectionKind, Disposition, Severity};
 pub use yara_engine::YaraEngine;
