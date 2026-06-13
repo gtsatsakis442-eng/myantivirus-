@@ -22,7 +22,31 @@
 use std::path::Path;
 use std::process::Command;
 
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
 use crate::error::{Result, ScanError};
+
+/// Ed25519 verifying key burned into the binary for signed definition-pack
+/// verification.  The companion private key is kept off the repo and used
+/// only by the build/release pipeline to sign first-party feeds.
+///
+/// To generate a new keypair (replace before production shipping):
+///   openssl genpkey -algorithm ed25519 -out talos-sign.pem
+///   openssl pkey -in talos-sign.pem -pubout -outform DER -out talos-sign-pub.der
+///   xxd -i talos-sign-pub.der  # last 32 bytes are the raw key
+///
+/// To sign a feed file and produce the companion `.sig` (hex-encoded 64 bytes):
+///   openssl pkeyutl -sign -inkey talos-sign.pem -rawin -in feed.hashdb \
+///       | xxd -p -c 64 > feed.hashdb.sig
+///
+/// This placeholder is the RFC 8037 Appendix A test vector; replace with the
+/// real production key before shipping.
+const TALOS_VERIFYING_KEY: [u8; 32] = [
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
+    0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
+    0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+];
 
 /// Which feeds to pull and from where.
 #[derive(Debug, Clone)]
@@ -36,6 +60,11 @@ pub struct UpdateOptions {
     pub threatfox_url: String,
     pub yara_urls: Vec<String>,
     pub clamav_url: Option<String>,
+    /// Optional URL to a first-party, Ed25519-signed SHA-256 hash list.
+    /// The signature is fetched from `<url>.sig` (hex-encoded 64-byte raw
+    /// Ed25519 signature) and verified against [`TALOS_VERIFYING_KEY`] before
+    /// the hashes are applied.  Leave `None` to disable.
+    pub signed_feed_url: Option<String>,
 }
 
 impl Default for UpdateOptions {
@@ -52,6 +81,8 @@ impl Default for UpdateOptions {
             threatfox_url: "https://threatfox.abuse.ch/export/csv/sha256/recent/".to_string(),
             yara_urls: default_yara_urls(),
             clamav_url: env_nonempty("TALOS_CLAMAV_URL"),
+            // Optional: point at a self-hosted, Ed25519-signed hash pack.
+            signed_feed_url: env_nonempty("TALOS_SIGNED_FEED_URL"),
         }
     }
 }
@@ -178,7 +209,49 @@ pub fn update(store: &Path, opts: &UpdateOptions) -> UpdateReport {
             .push(format!("Open YARA: {ok} rule file(s)"));
     }
 
+    // Signed first-party feed: fetch, verify Ed25519 signature, then apply.
+    if let Some(ref url) = opts.signed_feed_url {
+        match fetch_verified(url) {
+            Ok(text) => {
+                let n = parse_sha256_list(&text, "TalosSignedFeed");
+                let _ = std::fs::write(hashes_dir.join("signed_feed.hashdb"), &n.1);
+                report.hashes_added += n.0;
+                report
+                    .messages
+                    .push(format!("signed feed: {} hash(es) — signature verified", n.0));
+            }
+            Err(e) => report.messages.push(format!("signed feed: {e}")),
+        }
+    }
+
     report
+}
+
+/// Download `url` AND the companion `<url>.sig` file (hex-encoded 64-byte raw
+/// Ed25519 signature), verify the signature against [`TALOS_VERIFYING_KEY`],
+/// and return the feed text only if the signature is valid.
+fn fetch_verified(url: &str) -> Result<String> {
+    let sig_url = format!("{url}.sig");
+    let text = fetch_text(url, None)?;
+    let sig_hex = fetch_text(&sig_url, None)
+        .map_err(|e| ScanError::Update(format!("signature fetch failed ({sig_url}): {e}")))?;
+    let sig_bytes = hex::decode(sig_hex.trim())
+        .map_err(|_| ScanError::Update("signature file is not valid hex".into()))?;
+    verify_ed25519(text.as_bytes(), &sig_bytes)?;
+    Ok(text)
+}
+
+/// Verify a raw Ed25519 signature over `data` using the pinned
+/// [`TALOS_VERIFYING_KEY`].  `sig_bytes` must be exactly 64 bytes.
+fn verify_ed25519(data: &[u8], sig_bytes: &[u8]) -> Result<()> {
+    let vk = VerifyingKey::from_bytes(&TALOS_VERIFYING_KEY)
+        .map_err(|e| ScanError::Update(format!("built-in verifying key is invalid: {e}")))?;
+    let sig_arr: &[u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| ScanError::Update(format!("signature must be 64 bytes, got {}", sig_bytes.len())))?;
+    let sig = Signature::from_bytes(sig_arr);
+    vk.verify(data, &sig)
+        .map_err(|_| ScanError::Update("Ed25519 signature verification failed".into()))
 }
 
 fn sanitize_name(name: &str) -> String {
@@ -353,5 +426,26 @@ mod tests {
     fn sanitize_name_strips_paths() {
         assert_eq!(sanitize_name("gen_webshells.yar"), "gen_webshells.yar");
         assert_eq!(sanitize_name("../../etc/passwd"), "....etcpasswd");
+    }
+
+    #[test]
+    fn verify_ed25519_rejects_wrong_sig() {
+        // An all-zero signature is always invalid.
+        let bad = [0u8; 64];
+        assert!(matches!(verify_ed25519(b"hello world", &bad), Err(ScanError::Update(_))));
+    }
+
+    #[test]
+    fn verify_ed25519_rejects_wrong_length() {
+        let short = [0u8; 32];
+        assert!(matches!(verify_ed25519(b"hello", &short), Err(ScanError::Update(_))));
+    }
+
+    #[test]
+    fn signed_feed_url_in_default_options_reads_env() {
+        // Without the env var set, signed_feed_url is None.
+        std::env::remove_var("TALOS_SIGNED_FEED_URL");
+        let opts = UpdateOptions::default();
+        assert!(opts.signed_feed_url.is_none());
     }
 }

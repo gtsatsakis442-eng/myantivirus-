@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use scanner_core::{ransom_guard, realtime, Scanner};
 use talos_ipc::frame::{read_msg, write_msg};
 use talos_ipc::transport::{accept, bind};
-use talos_ipc::{EndpointInfo, Envelope, Listener, Response, Stream};
+use talos_ipc::{EndpointInfo, Envelope, Listener, Request, Response, Stream};
 
 use crate::core::Shared;
 
@@ -59,6 +59,7 @@ pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
 
     let realtime = spawn_realtime(Arc::clone(&shared));
     let canaries = spawn_canaries(Arc::clone(&shared));
+    let scheduler = spawn_scheduler(Arc::clone(&shared));
 
     serve(&listener, &shared);
 
@@ -66,6 +67,7 @@ pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
     crate::paths::remove_endpoint();
     let _ = realtime.join();
     let _ = canaries.join();
+    let _ = scheduler.join();
     Ok(())
 }
 
@@ -137,6 +139,85 @@ fn spawn_realtime(shared: Arc<Shared>) -> thread::JoinHandle<()> {
             }
         }
     })
+}
+
+/// Scheduled-scan background thread: reads `<data>/config.json` once per
+/// minute and fires a `StartScan` when the configured cadence has elapsed.
+/// The last-fire timestamp is persisted to `<data>/scheduler.state` so a
+/// system reboot does not reset the cadence — a missed scan fires within one
+/// minute of the agent starting.
+fn spawn_scheduler(shared: Arc<Shared>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        // Restore the previous fire time from disk (0 if first run).
+        let mut last_fire_unix = read_scheduled_unix();
+        loop {
+            // Sleep in 1-second ticks so shutdown is always responsive.
+            for _ in 0..60u32 {
+                if shared.shutdown_requested() {
+                    return;
+                }
+                thread::sleep(Duration::from_secs(1));
+            }
+            if shared.shutdown_requested() {
+                return;
+            }
+            // Re-read config every minute so a schedule change takes effect
+            // without restarting the agent.
+            let interval = match read_schedule_secs() {
+                Some(s) => s,
+                None => continue, // Schedule::Off
+            };
+            let now = scheduler_unix_now();
+            if now.saturating_sub(last_fire_unix) >= interval {
+                shared.push_event(
+                    talos_ipc::proto::severity::INFO,
+                    "scheduled scan: starting".to_string(),
+                    None,
+                );
+                let _ = shared.handle(Request::StartScan {
+                    paths: vec![],
+                    quarantine: true,
+                });
+                last_fire_unix = now;
+                write_scheduled_unix(now);
+            }
+        }
+    })
+}
+
+/// Parse the `schedule` field from `<data>/config.json`, returning the
+/// interval in seconds, or `None` when the schedule is Off or unreadable.
+fn read_schedule_secs() -> Option<u64> {
+    let path = crate::paths::data_dir().join("config.json");
+    let text = std::fs::read_to_string(path).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&text).ok()?;
+    match val.get("schedule").and_then(|s| s.as_str()) {
+        Some("Daily") => Some(24 * 3600),
+        Some("Weekly") => Some(7 * 24 * 3600),
+        _ => None,
+    }
+}
+
+fn scheduler_unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn scheduled_state_path() -> std::path::PathBuf {
+    crate::paths::data_dir().join("scheduler.state")
+}
+
+fn read_scheduled_unix() -> u64 {
+    std::fs::read_to_string(scheduled_state_path())
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn write_scheduled_unix(unix: u64) {
+    let _ = std::fs::write(scheduled_state_path(), unix.to_string());
 }
 
 /// Ransomware canary guard: plant decoys and alarm if any is tampered.
