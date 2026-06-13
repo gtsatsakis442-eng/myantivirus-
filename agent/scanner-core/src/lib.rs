@@ -42,6 +42,7 @@ pub mod pipeline;
 pub mod quarantine;
 pub mod ransom_guard;
 pub mod realtime;
+pub mod remediation;
 pub mod report;
 pub mod signatures;
 pub mod verdict;
@@ -63,6 +64,10 @@ pub use lolbin::analyze as analyze_lolbins;
 pub use pipeline::{ScanOptions, Scanner, DEFAULT_MAX_CONTENT_BYTES};
 pub use quarantine::{Quarantine, QuarantineEntry};
 pub use realtime::Watch;
+pub use remediation::{
+    BaselineEntry, ContextRisk, ModuleIdentity, ProcessContext, Remediation, TrustBaseline,
+    TrustTier,
+};
 pub use report::{ScanReport, ScanSummary};
 pub use signatures::HashSignatureDb;
 pub use verdict::{Detection, DetectionKind, Disposition, Severity};
