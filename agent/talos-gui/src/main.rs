@@ -21,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use egui::{Color32, RichText};
-use scanner_core::{ScanReport, Severity};
+use scanner_core::{ScanReport, Severity, BASELINE_BLOCKS, BASELINE_PORTS};
 
 use config::{Schedule, TalosConfig};
 use engine_glue::ScanMsg;
@@ -158,6 +158,8 @@ struct TalosApp {
     custom_path: String,
     new_exclusion: String,
     firewall_ip: String,
+    new_port_rule: String,
+    new_ip_rule: String,
 
     rx: Option<Receiver<ScanMsg>>,
     /// Raise to stop the running scan early (drives `ScanOptions::cancel`).
@@ -229,6 +231,8 @@ impl TalosApp {
             custom_path: String::new(),
             new_exclusion: String::new(),
             firewall_ip: String::new(),
+            new_port_rule: String::new(),
+            new_ip_rule: String::new(),
             rx: None,
             scan_stop: None,
             scanning: false,
@@ -1356,6 +1360,281 @@ impl TalosApp {
             }
         }
 
+        // ─── Custom Rules ──────────────────────────────────────────────────
+        ui.add_space(12.0);
+        nav_section(ui, "CUSTOM RULES");
+
+        // Predefined baseline display (read-only).
+        card(ui, CARD, |ui| {
+            ui.label(
+                RichText::new("Predefined Baseline Blocks")
+                    .color(TEXT)
+                    .size(15.0)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new(
+                    "Applied at every agent start — no network required. Covers RAT/C2/Tor/mining \
+                     endpoints with no legitimate use on managed endpoints.",
+                )
+                .color(DIM)
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+            ui.label(RichText::new("BLOCKED PORTS").color(DIM).size(10.5).strong());
+            ui.add_space(4.0);
+            let midpoint = BASELINE_PORTS.len().div_ceil(2);
+            ui.columns(2, |cols| {
+                for (i, (port, _)) in BASELINE_PORTS.iter().enumerate() {
+                    let col = if i < midpoint { 0 } else { 1 };
+                    cols[col].horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("TCP/{port}"))
+                                .color(ACCENT)
+                                .size(12.0)
+                                .strong(),
+                        );
+                        ui.label(
+                            RichText::new(port_label(*port)).color(DIM).size(11.0),
+                        );
+                    });
+                }
+            });
+            ui.add_space(8.0);
+            ui.label(RichText::new("BLOCKED IPs").color(DIM).size(10.5).strong());
+            ui.add_space(4.0);
+            for (ip, label) in BASELINE_BLOCKS {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(*ip).color(ACCENT).size(12.0).strong(),
+                    );
+                    ui.label(RichText::new(*label).color(DIM).size(11.0));
+                });
+            }
+        });
+        ui.add_space(8.0);
+
+        let busy = self.admin_busy;
+
+        // Custom port rules.
+        let mut add_port: Option<u16> = None;
+        let mut remove_port_idx: Option<usize> = None;
+        card(ui, CARD, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Custom Port Blocks").color(TEXT).size(15.0).strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} rule(s)",
+                            self.config.custom_blocked_ports.len()
+                        ))
+                        .color(DIM)
+                        .size(12.0),
+                    );
+                });
+            });
+            ui.label(
+                RichText::new(
+                    "Drop outbound TCP connections to additional ports. \
+                     Requires Administrator/root.",
+                )
+                .color(DIM)
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+            ui.add_enabled_ui(!busy, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("TCP port:").color(DIM).size(12.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_port_rule)
+                            .desired_width(80.0)
+                            .hint_text("8080"),
+                    );
+                    if secondary_button(ui, "Add").clicked() {
+                        if let Ok(p) = self.new_port_rule.trim().parse::<u16>() {
+                            if p > 0 {
+                                add_port = Some(p);
+                            }
+                        }
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            if self.config.custom_blocked_ports.is_empty() {
+                ui.label(RichText::new("No custom port rules.").color(DIM).size(12.0));
+            } else {
+                let ports: Vec<u16> = self.config.custom_blocked_ports.clone();
+                for (i, port) in ports.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("TCP/{port}"))
+                                .color(TEXT)
+                                .size(13.0)
+                                .strong(),
+                        );
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    if ui
+                                        .small_button(
+                                            RichText::new("Remove").color(ACCENT).size(11.0),
+                                        )
+                                        .clicked()
+                                    {
+                                        remove_port_idx = Some(i);
+                                    }
+                                });
+                            },
+                        );
+                    });
+                }
+            }
+        });
+        ui.add_space(8.0);
+
+        if let Some(port) = add_port {
+            let in_baseline = BASELINE_PORTS.iter().any(|(p, _)| *p == port);
+            if in_baseline {
+                self.new_port_rule.clear();
+                self.status = format!("TCP/{port} is already in the predefined baseline.");
+            } else if self.config.custom_blocked_ports.contains(&port) {
+                self.new_port_rule.clear();
+                self.status = format!("TCP/{port} is already in the custom block list.");
+            } else {
+                self.config.custom_blocked_ports.push(port);
+                self.config.save();
+                self.new_port_rule.clear();
+                if !self.admin_busy {
+                    self.admin_busy = true;
+                    self.admin_rx = Some(engine_glue::start_firewall_block_port(port));
+                    self.status = format!("Blocking outbound TCP/{port}…");
+                }
+            }
+        }
+        if let Some(i) = remove_port_idx {
+            let port = self.config.custom_blocked_ports[i];
+            self.config.custom_blocked_ports.remove(i);
+            self.config.save();
+            if !self.admin_busy {
+                self.admin_busy = true;
+                self.admin_rx = Some(engine_glue::start_firewall_unblock_port(port));
+                self.status = format!("Removing TCP/{port} block…");
+            }
+        }
+
+        // Custom IP / CIDR rules.
+        let mut add_ip: Option<String> = None;
+        let mut remove_ip_idx: Option<usize> = None;
+        card(ui, CARD, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Custom IP / CIDR Blocks")
+                        .color(TEXT)
+                        .size(15.0)
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} rule(s)",
+                            self.config.custom_blocked_ips.len()
+                        ))
+                        .color(DIM)
+                        .size(12.0),
+                    );
+                });
+            });
+            ui.label(
+                RichText::new(
+                    "Drop outbound traffic to a specific IPv4 address or subnet. \
+                     Accepts bare IPs (1.2.3.4) and CIDR notation (1.2.3.0/24).",
+                )
+                .color(DIM)
+                .size(12.0),
+            );
+            ui.add_space(8.0);
+            ui.add_enabled_ui(!busy, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("IP / CIDR:").color(DIM).size(12.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_ip_rule)
+                            .desired_width(180.0)
+                            .hint_text("203.0.113.7  or  198.51.100.0/24"),
+                    );
+                    if secondary_button(ui, "Add").clicked() {
+                        let ip = self.new_ip_rule.trim().to_string();
+                        if !ip.is_empty() {
+                            add_ip = Some(ip);
+                        }
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            if self.config.custom_blocked_ips.is_empty() {
+                ui.label(RichText::new("No custom IP rules.").color(DIM).size(12.0));
+            } else {
+                let ips: Vec<String> = self.config.custom_blocked_ips.clone();
+                for (i, ip) in ips.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(ip.as_str()).color(TEXT).size(13.0).strong(),
+                        );
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.add_enabled_ui(!busy, |ui| {
+                                    if ui
+                                        .small_button(
+                                            RichText::new("Remove").color(ACCENT).size(11.0),
+                                        )
+                                        .clicked()
+                                    {
+                                        remove_ip_idx = Some(i);
+                                    }
+                                });
+                            },
+                        );
+                    });
+                }
+            }
+        });
+        ui.add_space(8.0);
+
+        if let Some(ip) = add_ip {
+            if self.config.custom_blocked_ips.contains(&ip) {
+                self.new_ip_rule.clear();
+                self.status = format!("{ip} is already in the block list.");
+            } else {
+                self.config.custom_blocked_ips.push(ip.clone());
+                self.config.save();
+                self.new_ip_rule.clear();
+                if fw_agent {
+                    agent_link::block_ip(ip.clone());
+                    self.status = format!("Blocking {ip} via agent service.");
+                } else if !self.admin_busy {
+                    self.admin_busy = true;
+                    self.admin_rx = Some(engine_glue::start_firewall_block(ip.clone()));
+                    self.status = format!("Blocking outbound {ip}…");
+                }
+            }
+        }
+        if let Some(i) = remove_ip_idx {
+            let ip = self.config.custom_blocked_ips[i].clone();
+            self.config.custom_blocked_ips.remove(i);
+            self.config.save();
+            if fw_agent {
+                agent_link::unblock_ip(ip.clone());
+                self.status = format!("Removed {ip} block via agent service.");
+            } else if !self.admin_busy {
+                self.admin_busy = true;
+                self.admin_rx = Some(engine_glue::start_firewall_unblock(ip.clone()));
+                self.status = format!("Removing {ip} block…");
+            }
+        }
+
         ui.add_space(12.0);
         nav_section(ui, "ROADMAP · PHASE 2 (KERNEL SENSOR)");
         for (name, desc) in [
@@ -2210,6 +2489,28 @@ fn on_off(b: bool) -> &'static str {
         "on"
     } else {
         "off"
+    }
+}
+
+fn port_label(port: u16) -> &'static str {
+    match port {
+        1337 => "Leet backdoor",
+        4444 => "Metasploit",
+        4782 => "Quasar RAT",
+        5552 => "njRAT",
+        6606 | 7707 | 8808 => "AsyncRAT",
+        6666 | 6667 => "IRC C2",
+        6697 => "IRC C2 (TLS)",
+        9001 => "Tor ORPort",
+        9030 => "Tor DirPort",
+        9050 => "Tor SOCKS",
+        9051 => "Tor control",
+        9150 => "Tor Browser",
+        12345 => "NetBus",
+        14433 => "XMRig HTTPS",
+        14444 => "XMRig HTTP",
+        31337 => "Back Orifice",
+        _ => "",
     }
 }
 

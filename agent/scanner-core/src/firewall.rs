@@ -388,6 +388,79 @@ pub fn unblock_ip(ip: &str) -> Result<()> {
     run(&unblock_command(ip).0, &unblock_command(ip).1)
 }
 
+/// Block a single outbound port (user-defined custom rule).
+pub fn block_port(port: u16, proto: &str) -> Result<()> {
+    if cfg!(windows) {
+        run(
+            "netsh",
+            &argv(&[
+                "advfirewall",
+                "firewall",
+                "add",
+                "rule",
+                &format!("name={TAG}-custom-port-{port}"),
+                "dir=out",
+                "action=block",
+                &format!("protocol={proto}"),
+                &format!("remoteport={port}"),
+            ]),
+        )
+    } else {
+        run(
+            "iptables",
+            &argv(&[
+                "-A",
+                "OUTPUT",
+                "-p",
+                proto,
+                "--dport",
+                &port.to_string(),
+                "-m",
+                "comment",
+                "--comment",
+                &format!("{TAG}-custom"),
+                "-j",
+                "DROP",
+            ]),
+        )
+    }
+}
+
+/// Remove a user-defined port block rule.
+pub fn unblock_port(port: u16, proto: &str) -> Result<()> {
+    if cfg!(windows) {
+        let _ = run(
+            "netsh",
+            &argv(&[
+                "advfirewall",
+                "firewall",
+                "delete",
+                "rule",
+                &format!("name={TAG}-custom-port-{port}"),
+            ]),
+        );
+    } else {
+        let _ = run(
+            "iptables",
+            &argv(&[
+                "-D",
+                "OUTPUT",
+                "-p",
+                proto,
+                "--dport",
+                &port.to_string(),
+                "-m",
+                "comment",
+                "--comment",
+                &format!("{TAG}-custom"),
+                "-j",
+                "DROP",
+            ]),
+        );
+    }
+    Ok(())
+}
+
 /// Remove all Talos-created firewall rules (feed chain + baseline + manual).
 pub fn flush() -> Result<()> {
     flush_baseline().ok();
