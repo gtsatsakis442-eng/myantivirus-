@@ -1850,6 +1850,43 @@ impl TalosApp {
         });
         ui.add_space(10.0);
 
+        // --- Startup protection ---
+        card(ui, CARD, |ui| {
+            ui.label(
+                RichText::new("Startup protection")
+                    .color(TEXT)
+                    .size(16.0)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new(
+                    "Bring network defenses up automatically when the agent service starts.",
+                )
+                .color(DIM)
+                .size(11.0),
+            );
+            ui.add_space(6.0);
+            if ui
+                .checkbox(
+                    &mut self.config.firewall_autostart,
+                    "Firewall — block malware ports, RAT/Tor IPs, and C2 feeds at boot",
+                )
+                .changed()
+            {
+                dirty = true;
+            }
+            if ui
+                .checkbox(
+                    &mut self.config.web_autostart,
+                    "Web protection — sinkhole known-malicious domains at boot",
+                )
+                .changed()
+            {
+                dirty = true;
+            }
+        });
+        ui.add_space(10.0);
+
         // --- Scheduled scan ---
         card(ui, CARD, |ui| {
             ui.label(
@@ -1860,7 +1897,7 @@ impl TalosApp {
             );
             ui.label(
                 RichText::new(
-                    "Saved now; runs automatically once the Phase-2 background service ships.",
+                    "Runs a quick scan automatically at the chosen cadence via the agent service.",
                 )
                 .color(DIM)
                 .size(11.0),

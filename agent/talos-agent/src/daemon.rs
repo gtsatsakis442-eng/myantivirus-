@@ -61,6 +61,10 @@ pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
     let canaries = spawn_canaries(Arc::clone(&shared));
     let scheduler = spawn_scheduler(Arc::clone(&shared));
 
+    // Bring network protection up at boot so the endpoint is defended without a
+    // client ever connecting (config-gated; both default ON).
+    spawn_autostart(Arc::clone(&shared));
+
     serve(&listener, &shared);
 
     // A Shutdown request broke the accept loop; let the workers wind down.
@@ -183,6 +187,42 @@ fn spawn_scheduler(shared: Arc<Shared>) -> thread::JoinHandle<()> {
             }
         }
     })
+}
+
+/// Turn on the firewall and web/domain protection at startup unless the user
+/// has opted out in `<data>/config.json`. Both default ON so a fresh install is
+/// protected immediately. The `SetFirewall`/`SetWebProtection` handlers each
+/// spawn their own worker thread, so this returns promptly.
+fn spawn_autostart(shared: Arc<Shared>) {
+    if config_flag("firewall_autostart", true) {
+        shared.push_event(
+            talos_ipc::proto::severity::INFO,
+            "autostart: enabling firewall (baseline + threat feeds)".to_string(),
+            None,
+        );
+        let _ = shared.handle(Request::SetFirewall { on: true });
+    }
+    if config_flag("web_autostart", true) {
+        shared.push_event(
+            talos_ipc::proto::severity::INFO,
+            "autostart: enabling web/domain protection".to_string(),
+            None,
+        );
+        let _ = shared.handle(Request::SetWebProtection { on: true });
+    }
+}
+
+/// Read a boolean flag from `<data>/config.json`, falling back to `default`
+/// when the file or key is absent/unreadable.
+fn config_flag(key: &str, default: bool) -> bool {
+    let path = crate::paths::data_dir().join("config.json");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return default;
+    };
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return default;
+    };
+    val.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
 /// Parse the `schedule` field from `<data>/config.json`, returning the
