@@ -264,8 +264,7 @@ impl TrustBaseline {
         let tier = self.classify(id);
         match tier {
             TrustTier::Unknown => Remediation::AlertStands {
-                reason: "module not in trust baseline — alert flows to normal pipeline"
-                    .to_string(),
+                reason: "module not in trust baseline — alert flows to normal pipeline".to_string(),
             },
             TrustTier::FullyValidated | TrustTier::PublisherTrusted => {
                 if ctx.risk == ContextRisk::Trusted {
@@ -428,7 +427,7 @@ mod tests {
     use super::*;
 
     fn h(byte: char) -> String {
-        std::iter::repeat(byte).take(64).collect()
+        std::iter::repeat_n(byte, 64).collect()
     }
 
     fn baseline() -> TrustBaseline {
@@ -446,7 +445,10 @@ mod tests {
     fn trusted_ctx() -> ProcessContext {
         ProcessContext::assess(
             "C:\\Program Files\\Acme\\plugin.dll",
-            vec!["C:\\Windows\\explorer.exe".into(), "C:\\Program Files\\Acme\\app.exe".into()],
+            vec![
+                "C:\\Windows\\explorer.exe".into(),
+                "C:\\Program Files\\Acme\\app.exe".into(),
+            ],
         )
     }
 
@@ -594,7 +596,10 @@ mod tests {
             path_risk("C:\\Users\\bob\\AppData\\Local\\Temp\\x.dll"),
             ContextRisk::HighRisk
         );
-        assert_eq!(path_risk("C:\\Users\\bob\\Downloads\\x.dll"), ContextRisk::HighRisk);
+        assert_eq!(
+            path_risk("C:\\Users\\bob\\Downloads\\x.dll"),
+            ContextRisk::HighRisk
+        );
         assert_eq!(path_risk("/usr/lib/libc.so.6"), ContextRisk::Trusted);
         assert_eq!(path_risk("/tmp/payload.so"), ContextRisk::HighRisk);
         assert_eq!(path_risk("D:\\games\\game.dll"), ContextRisk::Unverified);

@@ -287,32 +287,36 @@ pub fn start_firewall_unblock(ip: String) -> Receiver<AdminMsg> {
 
 /// Block a single outbound TCP port (user-defined custom rule, in-process).
 pub fn start_firewall_block_port(port: u16) -> Receiver<AdminMsg> {
-    spawn_admin(move || match scanner_core::firewall::block_port(port, "tcp") {
-        Ok(()) => {
-            history::record("firewall", format!("Blocked outbound TCP/{port}"));
-            AdminMsg::Firewall {
-                on: true,
-                blocked: None,
-                note: format!("Blocked outbound TCP/{port}."),
+    spawn_admin(
+        move || match scanner_core::firewall::block_port(port, "tcp") {
+            Ok(()) => {
+                history::record("firewall", format!("Blocked outbound TCP/{port}"));
+                AdminMsg::Firewall {
+                    on: true,
+                    blocked: None,
+                    note: format!("Blocked outbound TCP/{port}."),
+                }
             }
-        }
-        Err(e) => AdminMsg::Failed(format!("Port block failed: {e}")),
-    })
+            Err(e) => AdminMsg::Failed(format!("Port block failed: {e}")),
+        },
+    )
 }
 
 /// Remove a user-defined TCP port block (in-process).
 pub fn start_firewall_unblock_port(port: u16) -> Receiver<AdminMsg> {
-    spawn_admin(move || match scanner_core::firewall::unblock_port(port, "tcp") {
-        Ok(()) => {
-            history::record("firewall", format!("Unblocked TCP/{port}"));
-            AdminMsg::Firewall {
-                on: true,
-                blocked: None,
-                note: format!("Removed TCP/{port} block."),
+    spawn_admin(
+        move || match scanner_core::firewall::unblock_port(port, "tcp") {
+            Ok(()) => {
+                history::record("firewall", format!("Unblocked TCP/{port}"));
+                AdminMsg::Firewall {
+                    on: true,
+                    blocked: None,
+                    note: format!("Removed TCP/{port} block."),
+                }
             }
-        }
-        Err(e) => AdminMsg::Failed(format!("Port unblock failed: {e}")),
-    })
+            Err(e) => AdminMsg::Failed(format!("Port unblock failed: {e}")),
+        },
+    )
 }
 
 /// Sync the abuse.ch URLhaus domain blocklist into the hosts file (in-process).

@@ -497,7 +497,8 @@ impl Shared {
                     Err(e) => {
                         // Feeds failed (likely offline), but the baseline is live.
                         me.firewall_on.store(true, Ordering::Relaxed);
-                        me.firewall_blocked.store(baseline.applied, Ordering::Relaxed);
+                        me.firewall_blocked
+                            .store(baseline.applied, Ordering::Relaxed);
                         me.push_event(
                             severity::ERROR,
                             format!("firewall feed sync failed (baseline active): {e}"),
@@ -519,11 +520,9 @@ impl Shared {
                             None,
                         );
                     }
-                    Err(e) => me.push_event(
-                        severity::ERROR,
-                        format!("firewall flush failed: {e}"),
-                        None,
-                    ),
+                    Err(e) => {
+                        me.push_event(severity::ERROR, format!("firewall flush failed: {e}"), None)
+                    }
                 }
             }
         });

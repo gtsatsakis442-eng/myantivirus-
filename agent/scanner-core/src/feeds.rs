@@ -42,10 +42,8 @@ use crate::error::{Result, ScanError};
 /// This placeholder is the RFC 8037 Appendix A test vector; replace with the
 /// real production key before shipping.
 const TALOS_VERIFYING_KEY: [u8; 32] = [
-    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
-    0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
-    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
-    0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
 ];
 
 /// Which feeds to pull and from where.
@@ -216,9 +214,10 @@ pub fn update(store: &Path, opts: &UpdateOptions) -> UpdateReport {
                 let n = parse_sha256_list(&text, "TalosSignedFeed");
                 let _ = std::fs::write(hashes_dir.join("signed_feed.hashdb"), &n.1);
                 report.hashes_added += n.0;
-                report
-                    .messages
-                    .push(format!("signed feed: {} hash(es) — signature verified", n.0));
+                report.messages.push(format!(
+                    "signed feed: {} hash(es) — signature verified",
+                    n.0
+                ));
             }
             Err(e) => report.messages.push(format!("signed feed: {e}")),
         }
@@ -246,9 +245,12 @@ fn fetch_verified(url: &str) -> Result<String> {
 fn verify_ed25519(data: &[u8], sig_bytes: &[u8]) -> Result<()> {
     let vk = VerifyingKey::from_bytes(&TALOS_VERIFYING_KEY)
         .map_err(|e| ScanError::Update(format!("built-in verifying key is invalid: {e}")))?;
-    let sig_arr: &[u8; 64] = sig_bytes
-        .try_into()
-        .map_err(|_| ScanError::Update(format!("signature must be 64 bytes, got {}", sig_bytes.len())))?;
+    let sig_arr: &[u8; 64] = sig_bytes.try_into().map_err(|_| {
+        ScanError::Update(format!(
+            "signature must be 64 bytes, got {}",
+            sig_bytes.len()
+        ))
+    })?;
     let sig = Signature::from_bytes(sig_arr);
     vk.verify(data, &sig)
         .map_err(|_| ScanError::Update("Ed25519 signature verification failed".into()))
@@ -432,13 +434,19 @@ mod tests {
     fn verify_ed25519_rejects_wrong_sig() {
         // An all-zero signature is always invalid.
         let bad = [0u8; 64];
-        assert!(matches!(verify_ed25519(b"hello world", &bad), Err(ScanError::Update(_))));
+        assert!(matches!(
+            verify_ed25519(b"hello world", &bad),
+            Err(ScanError::Update(_))
+        ));
     }
 
     #[test]
     fn verify_ed25519_rejects_wrong_length() {
         let short = [0u8; 32];
-        assert!(matches!(verify_ed25519(b"hello", &short), Err(ScanError::Update(_))));
+        assert!(matches!(
+            verify_ed25519(b"hello", &short),
+            Err(ScanError::Update(_))
+        ));
     }
 
     #[test]

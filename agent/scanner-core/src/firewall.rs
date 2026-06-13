@@ -118,25 +118,25 @@ pub const KNOWN_FEEDS: &[FeedConfig] = &[
 /// The list is deliberately conservative — only ports whose *only* known use
 /// in the wild is malicious or covert tunnelling.
 pub const BASELINE_PORTS: &[(u16, &str)] = &[
-    (1337, "tcp"),   // classic "leet" backdoor convention
-    (4444, "tcp"),   // Metasploit meterpreter default listener
-    (4782, "tcp"),   // Quasar RAT default
-    (5552, "tcp"),   // njRAT default
-    (6606, "tcp"),   // AsyncRAT default
-    (6666, "tcp"),   // IRC botnet C2 (alt)
-    (6667, "tcp"),   // IRC botnet C2 (plaintext)
-    (6697, "tcp"),   // IRC botnet C2 (TLS)
-    (7707, "tcp"),   // AsyncRAT default (alt)
-    (8808, "tcp"),   // AsyncRAT default (alt)
-    (9001, "tcp"),   // Tor ORPort — anonymised C2 relay
-    (9030, "tcp"),   // Tor DirPort
-    (9050, "tcp"),   // Tor SOCKS proxy
-    (9051, "tcp"),   // Tor control port (remote = covert control)
-    (9150, "tcp"),   // Tor Browser SOCKS proxy
-    (12345, "tcp"),  // NetBus RAT
-    (31337, "tcp"),  // Back Orifice RAT ("elite")
-    (14444, "tcp"),  // XMRig Monero mining HTTP
-    (14433, "tcp"),  // XMRig Monero mining HTTPS
+    (1337, "tcp"),  // classic "leet" backdoor convention
+    (4444, "tcp"),  // Metasploit meterpreter default listener
+    (4782, "tcp"),  // Quasar RAT default
+    (5552, "tcp"),  // njRAT default
+    (6606, "tcp"),  // AsyncRAT default
+    (6666, "tcp"),  // IRC botnet C2 (alt)
+    (6667, "tcp"),  // IRC botnet C2 (plaintext)
+    (6697, "tcp"),  // IRC botnet C2 (TLS)
+    (7707, "tcp"),  // AsyncRAT default (alt)
+    (8808, "tcp"),  // AsyncRAT default (alt)
+    (9001, "tcp"),  // Tor ORPort — anonymised C2 relay
+    (9030, "tcp"),  // Tor DirPort
+    (9050, "tcp"),  // Tor SOCKS proxy
+    (9051, "tcp"),  // Tor control port (remote = covert control)
+    (9150, "tcp"),  // Tor Browser SOCKS proxy
+    (12345, "tcp"), // NetBus RAT
+    (31337, "tcp"), // Back Orifice RAT ("elite")
+    (14444, "tcp"), // XMRig Monero mining HTTP
+    (14433, "tcp"), // XMRig Monero mining HTTPS
 ];
 
 /// Hardcoded malicious IPs blocked offline by the baseline — no feed download
@@ -285,12 +285,7 @@ pub fn apply_baseline() -> Result<FirewallReport> {
     } else {
         // Create/flush the baseline chain and jump to it from OUTPUT.
         let _ = run("iptables", &argv(&["-N", BASELINE_CHAIN]));
-        if run(
-            "iptables",
-            &argv(&["-C", "OUTPUT", "-j", BASELINE_CHAIN]),
-        )
-        .is_err()
-        {
+        if run("iptables", &argv(&["-C", "OUTPUT", "-j", BASELINE_CHAIN])).is_err() {
             run(
                 "iptables",
                 &argv(&["-I", "OUTPUT", "1", "-j", BASELINE_CHAIN]),
@@ -493,7 +488,10 @@ fn apply_targets_report(feed_name: &str, targets: Vec<String>) -> Result<Firewal
         report.applied
     );
     if report.skipped > 0 {
-        msg.push_str(&format!(" · {} non-public entr(ies) skipped", report.skipped));
+        msg.push_str(&format!(
+            " · {} non-public entr(ies) skipped",
+            report.skipped
+        ));
     }
     report.messages.push(msg);
     Ok(report)
@@ -748,11 +746,7 @@ fn parse_cidr_list(text: &str) -> Vec<String> {
             continue;
         }
         // Token before the first `;` or whitespace is the CIDR.
-        let token = line
-            .split([';', '#'])
-            .next()
-            .unwrap_or("")
-            .trim();
+        let token = line.split([';', '#']).next().unwrap_or("").trim();
         if is_cidr(token) && seen.insert(token.to_string()) {
             out.push(token.to_string());
         }
@@ -805,7 +799,7 @@ fn is_public_ipv4(ip: &Ipv4Addr) -> bool {
         || (o[0] == 192 && o[1] == 0 && o[2] == 2)      // TEST-NET-1
         || (o[0] == 198 && (o[1] == 18 || o[1] == 19)) // benchmarking
         || (o[0] == 198 && o[1] == 51 && o[2] == 100)  // TEST-NET-2
-        || (o[0] == 203 && o[1] == 0 && o[2] == 113))  // TEST-NET-3
+        || (o[0] == 203 && o[1] == 0 && o[2] == 113)) // TEST-NET-3
 }
 
 /// Strict dotted-quad IPv4 check.
@@ -827,13 +821,7 @@ fn is_ipv4(s: &str) -> bool {
 /// Validate `a.b.c.d/prefix` notation (prefix 0–32, network address valid).
 fn is_cidr(s: &str) -> bool {
     match s.split_once('/') {
-        Some((ip, prefix)) => {
-            is_ipv4(ip)
-                && prefix
-                    .parse::<u8>()
-                    .map(|p| p <= 32)
-                    .unwrap_or(false)
-        }
+        Some((ip, prefix)) => is_ipv4(ip) && prefix.parse::<u8>().map(|p| p <= 32).unwrap_or(false),
         None => false,
     }
 }
@@ -886,9 +874,9 @@ mod tests {
         assert!(is_cidr("10.0.0.0/8"));
         assert!(is_cidr("1.2.3.4/32"));
         assert!(is_cidr("0.0.0.0/0"));
-        assert!(!is_cidr("1.2.3.4"));       // no prefix
-        assert!(!is_cidr("1.2.3.4/33"));    // prefix out of range
-        assert!(!is_cidr("256.0.0.0/8"));   // bad network address
+        assert!(!is_cidr("1.2.3.4")); // no prefix
+        assert!(!is_cidr("1.2.3.4/33")); // prefix out of range
+        assert!(!is_cidr("256.0.0.0/8")); // bad network address
         assert!(!is_cidr("example.com/24")); // not an IP
     }
 
@@ -912,7 +900,10 @@ mod tests {
         assert!(cidrs.contains(&"1.0.1.0/24".to_string()));
         assert!(cidrs.contains(&"185.220.0.0/22".to_string()));
         assert!(cidrs.contains(&"10.0.0.0/8".to_string())); // parsed, but guard will skip
-        assert_eq!(cidrs.iter().filter(|c| c.as_str() == "1.0.1.0/24").count(), 1); // deduped
+        assert_eq!(
+            cidrs.iter().filter(|c| c.as_str() == "1.0.1.0/24").count(),
+            1
+        ); // deduped
     }
 
     #[test]
@@ -960,10 +951,7 @@ mod tests {
 
     #[test]
     fn restore_payload_handles_ips_and_cidrs() {
-        let targets = vec![
-            "5.6.7.8".to_string(),
-            "9.10.11.0/24".to_string(),
-        ];
+        let targets = vec!["5.6.7.8".to_string(), "9.10.11.0/24".to_string()];
         let payload = restore_payload(&targets);
         assert!(payload.starts_with("*filter\n"));
         assert!(payload.contains("-A TALOS_C2 -d 5.6.7.8/32 -j DROP\n"));

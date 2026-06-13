@@ -433,12 +433,7 @@ mod tests {
                 let log = Arc::clone(&log);
                 let det = det.clone();
                 std::thread::spawn(move || {
-                    log.log_detection(
-                        &format!("/tmp/evil_{i}.exe"),
-                        "aabbccdd",
-                        &det,
-                        "detected",
-                    );
+                    log.log_detection(&format!("/tmp/evil_{i}.exe"), "aabbccdd", &det, "detected");
                 })
             })
             .collect();
@@ -464,8 +459,7 @@ mod tests {
         log.log_firewall("185.100.87.202", "Feodo Tracker C2", "blocked");
         let content = std::fs::read_to_string(log.path()).unwrap();
         for line in content.lines() {
-            let v: serde_json::Value =
-                serde_json::from_str(line).expect("invalid JSON");
+            let v: serde_json::Value = serde_json::from_str(line).expect("invalid JSON");
             assert_eq!(v["product"], "TalosEPP");
         }
         let lines: Vec<_> = content.lines().collect();

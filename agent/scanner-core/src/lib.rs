@@ -56,7 +56,7 @@ pub use error::{Result, ScanError};
 pub use event_log::{EventLog, SiemEvent};
 pub use feeds::{UpdateOptions, UpdateReport};
 pub use firewall::{
-    FirewallReport, FeedConfig, FeedFormat, KNOWN_FEEDS, BASELINE_PORTS, BASELINE_BLOCKS,
+    FeedConfig, FeedFormat, FirewallReport, BASELINE_BLOCKS, BASELINE_PORTS, KNOWN_FEEDS,
 };
 pub use hashing::{hash_bytes, hash_reader, FileHashes};
 pub use intel::{lookup_hash, IntelReport};
