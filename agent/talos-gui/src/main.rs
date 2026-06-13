@@ -1381,7 +1381,12 @@ impl TalosApp {
                 .size(12.0),
             );
             ui.add_space(8.0);
-            ui.label(RichText::new("BLOCKED PORTS").color(DIM).size(10.5).strong());
+            ui.label(
+                RichText::new("BLOCKED PORTS")
+                    .color(DIM)
+                    .size(10.5)
+                    .strong(),
+            );
             ui.add_space(4.0);
             let midpoint = BASELINE_PORTS.len().div_ceil(2);
             ui.columns(2, |cols| {
@@ -1394,9 +1399,7 @@ impl TalosApp {
                                 .size(12.0)
                                 .strong(),
                         );
-                        ui.label(
-                            RichText::new(port_label(*port)).color(DIM).size(11.0),
-                        );
+                        ui.label(RichText::new(port_label(*port)).color(DIM).size(11.0));
                     });
                 }
             });
@@ -1405,9 +1408,7 @@ impl TalosApp {
             ui.add_space(4.0);
             for (ip, label) in BASELINE_BLOCKS {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(*ip).color(ACCENT).size(12.0).strong(),
-                    );
+                    ui.label(RichText::new(*ip).color(ACCENT).size(12.0).strong());
                     ui.label(RichText::new(*label).color(DIM).size(11.0));
                 });
             }
@@ -1422,7 +1423,10 @@ impl TalosApp {
         card(ui, CARD, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("Custom Port Blocks").color(TEXT).size(15.0).strong(),
+                    RichText::new("Custom Port Blocks")
+                        .color(TEXT)
+                        .size(15.0)
+                        .strong(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
@@ -1474,21 +1478,16 @@ impl TalosApp {
                                 .size(13.0)
                                 .strong(),
                         );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.add_enabled_ui(!busy, |ui| {
-                                    if ui
-                                        .small_button(
-                                            RichText::new("Remove").color(ACCENT).size(11.0),
-                                        )
-                                        .clicked()
-                                    {
-                                        remove_port_idx = Some(i);
-                                    }
-                                });
-                            },
-                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_enabled_ui(!busy, |ui| {
+                                if ui
+                                    .small_button(RichText::new("Remove").color(ACCENT).size(11.0))
+                                    .clicked()
+                                {
+                                    remove_port_idx = Some(i);
+                                }
+                            });
+                        });
                     });
                 }
             }
@@ -1538,12 +1537,9 @@ impl TalosApp {
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "{} rule(s)",
-                            self.config.custom_blocked_ips.len()
-                        ))
-                        .color(DIM)
-                        .size(12.0),
+                        RichText::new(format!("{} rule(s)", self.config.custom_blocked_ips.len()))
+                            .color(DIM)
+                            .size(12.0),
                     );
                 });
             });
@@ -1579,24 +1575,17 @@ impl TalosApp {
                 let ips: Vec<String> = self.config.custom_blocked_ips.clone();
                 for (i, ip) in ips.iter().enumerate() {
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(ip.as_str()).color(TEXT).size(13.0).strong(),
-                        );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.add_enabled_ui(!busy, |ui| {
-                                    if ui
-                                        .small_button(
-                                            RichText::new("Remove").color(ACCENT).size(11.0),
-                                        )
-                                        .clicked()
-                                    {
-                                        remove_ip_idx = Some(i);
-                                    }
-                                });
-                            },
-                        );
+                        ui.label(RichText::new(ip.as_str()).color(TEXT).size(13.0).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_enabled_ui(!busy, |ui| {
+                                if ui
+                                    .small_button(RichText::new("Remove").color(ACCENT).size(11.0))
+                                    .clicked()
+                                {
+                                    remove_ip_idx = Some(i);
+                                }
+                            });
+                        });
                     });
                 }
             }

