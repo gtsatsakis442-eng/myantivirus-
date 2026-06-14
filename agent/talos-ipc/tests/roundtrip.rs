@@ -56,7 +56,7 @@ fn serve_one(listener: Listener, expected: String) {
 #[test]
 fn authenticated_ping_gets_a_pong() {
     let name = temp_name();
-    let listener = bind(&name).unwrap();
+    let (listener, resolved_name) = bind(&name).unwrap();
     let token = "good-token".to_string();
     let server = thread::spawn({
         let token = token.clone();
@@ -64,7 +64,10 @@ fn authenticated_ping_gets_a_pong() {
     });
     thread::sleep(Duration::from_millis(50));
 
-    let endpoint = EndpointInfo { name, token };
+    let endpoint = EndpointInfo {
+        name: resolved_name,
+        token,
+    };
     let resp = client::call(&endpoint, Request::Ping).unwrap();
     assert!(matches!(resp, Response::Pong { .. }));
     server.join().unwrap();
@@ -73,12 +76,12 @@ fn authenticated_ping_gets_a_pong() {
 #[test]
 fn a_bad_token_is_rejected() {
     let name = temp_name();
-    let listener = bind(&name).unwrap();
+    let (listener, resolved_name) = bind(&name).unwrap();
     let server = thread::spawn(move || serve_one(listener, "good-token".into()));
     thread::sleep(Duration::from_millis(50));
 
     let endpoint = EndpointInfo {
-        name,
+        name: resolved_name,
         token: "WRONG".into(),
     };
     let resp = client::call(&endpoint, Request::Ping).unwrap();

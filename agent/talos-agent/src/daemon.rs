@@ -35,9 +35,9 @@ pub fn run(stop: Arc<AtomicBool>) -> Result<()> {
     let roots = crate::paths::quick_scan_paths();
     let token = crate::paths::generate_token();
     let name = crate::paths::endpoint_name();
-    let listener = bind(&name).context("binding the agent IPC socket")?;
+    let (listener, resolved_name) = bind(&name).context("binding the agent IPC socket")?;
     crate::paths::write_endpoint(&EndpointInfo {
-        name: name.clone(),
+        name: resolved_name,
         token: token.clone(),
     })
     .context("publishing the agent endpoint")?;

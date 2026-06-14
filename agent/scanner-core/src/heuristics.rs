@@ -64,18 +64,20 @@ struct Signals {
     /// Import table is entirely absent — almost always a packed or shellcode
     /// payload (legitimate EXEs/DLLs have at least a handful of imports).
     zero_imports: bool,
-    /// The PE is a DLL (IMAGE_FILE_DLL) but exports nothing — unusual for any
-    /// legitimate DLL (even pure COM objects are normally signed and trusted
-    /// by the Authenticode fast-path above).
-    dll_no_exports: bool,
     /// The DLL has exports but every one is ordinal-only (no symbol names).
     /// In-memory-only shellcode DLLs commonly use ordinal-only exports to
     /// make the IAT less obvious to static analysis.
     dll_ordinal_only_exports: bool,
-    /// The DLL imports functions but none come from kernel32/ntdll/kernelbase.
-    /// Normal DLLs always depend on at least one base library; absence usually
+    /// The DLL imports functions but none come from kernel32/ntdll/kernelbase
+    /// or common runtime libraries (.NET, COM, UCRT, Winsock). Absence usually
     /// means the payload resolves Win32 API via direct syscalls to evade hooks.
     missing_base_imports: bool,
+
+    // weight 1 — combined with other signals reaches threshold
+    /// The PE is a DLL (IMAGE_FILE_DLL) but exports nothing.
+    /// Weight 1 (not 2): resource-only DLLs, stub DLLs, and many plugin/COM
+    /// DLLs legitimately have no exports, so this alone is not a strong signal.
+    dll_no_exports: bool,
 
     // weight 4 — standalone verdict
     /// An export is named "ReflectiveLoader" or "ReflectiveDllInjection".
@@ -186,12 +188,23 @@ fn signals(pe: &PE, data: &[u8]) -> Signals {
         if !pe.exports.is_empty() {
             sig.dll_ordinal_only_exports = pe.exports.iter().all(|e| e.name.is_none());
         }
-        // A DLL that imports functions but avoids kernel32/ntdll entirely is
-        // using direct syscalls — a strong evasion indicator.
+        // A DLL that imports functions but avoids kernel32/ntdll/kernelbase AND
+        // common runtime libraries (mscoree for .NET, ole32/oleaut32 for COM,
+        // ucrtbase/vcruntime/msvcp for UCRT-only DLLs, ws2_32 for Winsock-only)
+        // is likely resolving Win32 via direct syscalls to evade hooks.
         if !imports.is_empty() {
             let has_base = pe.imports.iter().any(|i| {
                 let dll = i.dll.to_ascii_lowercase();
-                dll.contains("kernel32") || dll.contains("ntdll") || dll.contains("kernelbase")
+                dll.contains("kernel32")
+                    || dll.contains("ntdll")
+                    || dll.contains("kernelbase")
+                    || dll.contains("mscoree")
+                    || dll.contains("ole32")
+                    || dll.contains("oleaut32")
+                    || dll.contains("ucrtbase")
+                    || dll.contains("vcruntime")
+                    || dll.contains("msvcp")
+                    || dll.contains("ws2_32")
             });
             sig.missing_base_imports = !has_base;
         }
@@ -242,13 +255,13 @@ fn findings_for(sig: &Signals) -> Vec<Detection> {
             2,
         ),
         ("Heuristic.ZeroImports", sig.zero_imports, 2),
-        ("Heuristic.DllNoExports", sig.dll_no_exports, 2),
         (
             "Heuristic.DllOrdinalOnlyExports",
             sig.dll_ordinal_only_exports,
             2,
         ),
         ("Heuristic.MissingBaseImports", sig.missing_base_imports, 2),
+        ("Heuristic.DllNoExports", sig.dll_no_exports, 1),
     ];
 
     let triggered: Vec<(&str, Severity)> = items
@@ -478,17 +491,49 @@ mod tests {
     }
 
     #[test]
-    fn dll_no_exports_plus_packed_reaches_threshold() {
+    fn dll_no_exports_plus_packed_below_threshold() {
         let sig = Signals {
             dll_no_exports: true,
             packed_code: true,
             ..Default::default()
         };
         let findings = findings_for(&sig);
-        // dll_no_exports (2) + packed_code (1) = 3
+        // dll_no_exports (1) + packed_code (1) = 2 < threshold (3)
+        // Resource-only / plugin DLLs with optimised code must not be flagged.
+        assert!(
+            findings.is_empty(),
+            "DLL with no exports + packed code alone must NOT be flagged (too common in legit DLLs)"
+        );
+    }
+
+    #[test]
+    fn dll_no_exports_plus_two_weight1_reaches_threshold() {
+        let sig = Signals {
+            dll_no_exports: true,
+            packed_code: true,
+            timestamp_anomaly: true,
+            ..Default::default()
+        };
+        let findings = findings_for(&sig);
+        // dll_no_exports (1) + packed_code (1) + timestamp_anomaly (1) = 3
         assert!(
             !findings.is_empty(),
-            "DLL with no exports + packed code must be flagged"
+            "DLL with no exports + packed code + timestamp anomaly must be flagged"
+        );
+    }
+
+    #[test]
+    fn dll_no_exports_plus_weight2_reaches_threshold() {
+        let sig = Signals {
+            dll_no_exports: true,
+            writable_executable: true,
+            ..Default::default()
+        };
+        let findings = findings_for(&sig);
+        // dll_no_exports (1) + writable_executable (2) = 3
+        assert!(
+            !findings.is_empty(),
+            "DLL with no exports + W^X section must be flagged"
         );
     }
 

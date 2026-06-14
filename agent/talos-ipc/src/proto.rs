@@ -30,6 +30,10 @@ pub enum Request {
     ListQuarantine,
     /// Restore a quarantined item to its original location by id.
     Restore { id: String },
+    /// Permanently delete a single quarantined item by id.
+    Purge { id: String },
+    /// Permanently delete all quarantined items; returns the count removed.
+    PurgeAll,
     /// Turn the real-time on-access monitor on or off.
     SetRealtime { on: bool },
     /// Sync (on) the abuse.ch C2 blocklist, or flush (off) all Talos firewall rules.

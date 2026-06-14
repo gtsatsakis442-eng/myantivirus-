@@ -1845,13 +1845,26 @@ impl TalosApp {
         }
         if bulk_restore {
             let ids: Vec<String> = self.q_items.iter().map(|i| i.id.clone()).collect();
+            let count = ids.len();
             let (mut ok, mut failed) = (0usize, 0usize);
-            if let Ok(store) = scanner_core::Quarantine::open(engine_glue::quarantine_dir()) {
-                for id in &ids {
-                    match store.restore(id, None) {
-                        Ok(_) => ok += 1,
+            if self.agent_status.is_some() {
+                // Agent runs as SYSTEM — route through IPC so permissions are correct.
+                for id in ids {
+                    match agent_link::restore_item(id) {
+                        Ok(()) => ok += 1,
                         Err(_) => failed += 1,
                     }
+                }
+            } else {
+                if let Ok(store) = scanner_core::Quarantine::open(engine_glue::quarantine_dir()) {
+                    for id in &ids {
+                        match store.restore(id, None) {
+                            Ok(_) => ok += 1,
+                            Err(_) => failed += 1,
+                        }
+                    }
+                } else {
+                    failed = count;
                 }
             }
             history::record(
@@ -1869,9 +1882,22 @@ impl TalosApp {
             self.refresh_inventory();
         }
         if bulk_delete {
-            let n = scanner_core::Quarantine::open(engine_glue::quarantine_dir())
-                .and_then(|s| s.purge_all())
-                .unwrap_or(0);
+            let count = self.q_items.len();
+            let n = if self.agent_status.is_some() {
+                match agent_link::purge_all() {
+                    Ok(()) => count,
+                    Err(e) => {
+                        self.status = format!("Delete all failed: {e}");
+                        self.confirm_purge_all = false;
+                        self.reload_quarantine();
+                        return;
+                    }
+                }
+            } else {
+                scanner_core::Quarantine::open(engine_glue::quarantine_dir())
+                    .and_then(|s| s.purge_all())
+                    .unwrap_or(0)
+            };
             history::record("quarantine", format!("Deleted all — {n} item(s) purged"));
             self.status = format!("Deleted all {n} item(s) from quarantine.");
             self.confirm_purge_all = false;
@@ -1923,19 +1949,36 @@ impl TalosApp {
             });
 
         if let Some((act, id)) = action {
-            if let Ok(store) = scanner_core::Quarantine::open(engine_glue::quarantine_dir()) {
-                let _ = match act {
+            let err: Option<String> = if self.agent_status.is_some() {
+                match act {
                     Act::Restore => {
                         history::record("quarantine", "Restored an item from quarantine");
-                        store.restore(&id, None).map(|_| ())
+                        agent_link::restore_item(id).err()
                     }
                     Act::Purge => {
                         history::record("quarantine", "Deleted an item from quarantine");
-                        store.purge(&id)
+                        agent_link::purge_item(id).err()
                     }
-                };
-            }
-            self.status = "Quarantine updated.".to_string();
+                }
+            } else if let Ok(store) = scanner_core::Quarantine::open(engine_glue::quarantine_dir())
+            {
+                match act {
+                    Act::Restore => {
+                        history::record("quarantine", "Restored an item from quarantine");
+                        store.restore(&id, None).err().map(|e| e.to_string())
+                    }
+                    Act::Purge => {
+                        history::record("quarantine", "Deleted an item from quarantine");
+                        store.purge(&id).err().map(|e| e.to_string())
+                    }
+                }
+            } else {
+                Some("Cannot open quarantine store.".to_string())
+            };
+            self.status = match err {
+                Some(e) => format!("Operation failed: {e}"),
+                None => "Quarantine updated.".to_string(),
+            };
             self.activity_loaded = false;
             self.reload_quarantine();
             self.refresh_inventory();

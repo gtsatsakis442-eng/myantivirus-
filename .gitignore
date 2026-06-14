@@ -9,6 +9,15 @@
 *.wixobj
 installer/**/obj/
 
+# Code-signing private keys and encoded secrets — never commit these
+*.pfx
+*.pfx.base64
+*.pvk
+*.snk
+# Public cert (.cer) is allowed only in installer/sign/ (talos-signing.cer for GPO/Intune push)
+*.cer
+!installer/sign/talos-signing.cer
+
 # Python tooling
 __pycache__/
 *.pyc

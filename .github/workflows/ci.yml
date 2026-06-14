@@ -94,13 +94,14 @@ jobs:
           wix build Package.wxs -ext WixToolset.Util.wixext -d Version=$v -o talos-agent.msi
           if (-not (Test-Path talos-agent.msi)) { throw "MSI was not produced" }
 
-      - name: Code-signing simulation (app exes)
+      - name: Code-signing simulation (app exes + MSI)
         shell: pwsh
         run: |
           ./installer/sign/sign.ps1 -Mode simulate -Path `
             "target/x86_64-pc-windows-msvc/release/talos.exe", `
             "target/x86_64-pc-windows-msvc/release/talos-agent.exe", `
-            "target/x86_64-pc-windows-msvc/release/talos-gui.exe"
+            "target/x86_64-pc-windows-msvc/release/talos-gui.exe", `
+            "installer/wix/talos-agent.msi"
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4

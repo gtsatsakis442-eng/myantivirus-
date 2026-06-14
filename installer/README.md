@@ -4,7 +4,8 @@
 |---|---|
 | `wix/Package.wxs` | The **MSI** (enterprise/GPO/SCCM/Intune deployment artifact). |
 | `wix/Bundle.wxs` | The **Burn bootstrapper** → the single standalone `.exe`. |
-| `sign/sign.ps1` | Code-signing abstraction with a **CI simulation** mode. |
+| `sign/sign.ps1` | Code-signing entry point — **simulate** (CI gate) + **production** (signs exes + MSI). |
+| `sign/new-selfsigned-cert.ps1` | One-time helper to mint a stable self-signed signing cert + repo secrets. |
 
 ## Build (Windows, WiX v4/v5)
 
@@ -34,21 +35,57 @@ GPO/Intune/SCCM patterns and rollout rings.
 
 ## Code signing
 
-`sign/sign.ps1` is the single signing entry point:
+`sign/sign.ps1` is the single signing entry point. It signs both the **exes**
+and the **MSI** (Authenticode, SHA-256, RFC-3161 timestamp):
 
-- **`-Mode simulate`** (CI default): signs artifacts with an **ephemeral
-  self-signed** certificate and verifies the signature was applied. It exercises
-  the full Authenticode/timestamp path so signing breakage is caught on every
-  commit — *without* the production credential. The signature is deliberately
-  untrusted.
-- **`-Mode production`** (release host only): refuses to run in CI; on the
-  hardened signing host it would invoke `signtool` against the **EV certificate
-  in an HSM / Azure Key Vault** with an RFC-3161 timestamp. See
-  [docs/04](../docs/04-deployment-distribution.md) §1.
+- **`-Mode simulate`** (CI default): signs with an **ephemeral self-signed**
+  certificate and asserts a signature was applied, then deletes the cert. It
+  exercises the full Authenticode/timestamp path so signing breakage is caught
+  on every commit — *without* shipping a signature. Deliberately untrusted.
+- **`-Mode production`** (release workflow): signs for real and **keeps** the
+  signature. The certificate comes from two repo secrets when set, otherwise a
+  self-signed cert is generated on the fly:
+  - `TALOS_SIGNING_PFX_BASE64` — base64 of a `.pfx` (self-signed **or** CA/EV)
+  - `TALOS_SIGNING_PFX_PASSWORD` — its password
 
 ```powershell
-pwsh ./installer/sign/sign.ps1 -Mode simulate -Path talos.exe, talos-agent.msi
+pwsh ./installer/sign/sign.ps1 -Mode production -Path talos.exe, talos-agent.msi
 ```
+
+### Self-signed signing (current default)
+
+Releases are signed with a **stable self-signed** certificate:
+
+| File | Purpose |
+|---|---|
+| `installer/sign/talos-signing.cer` | Public cert — commit this, push to Trusted Publishers |
+| `TALOS_SIGNING_PFX_BASE64` (repo secret) | Base64 of the `.pfx` private key |
+| `TALOS_SIGNING_PFX_PASSWORD` (repo secret) | PFX password |
+
+The cert was generated with a 3-year validity (expires Jun 2029). Every release
+is signed with the same identity so you can pin the thumbprint in AppLocker/WDAC
+rules. Windows still shows **"Unknown Publisher"** because the cert isn't from a
+public CA. Push `talos-signing.cer` to **Trusted Publishers** via GPO/Intune to
+make the signature trusted on managed machines:
+
+```powershell
+# GPO: push the .cer to Trusted Publishers on all endpoints
+certutil -addstore "TrustedPublisher" installer/sign/talos-signing.cer
+```
+
+To rotate or replace the cert, run `installer/sign/new-selfsigned-cert.ps1` and
+update the two secrets.
+
+### Upgrading to a trusted (CA/EV) certificate
+
+The release path is identical — just replace `TALOS_SIGNING_PFX_BASE64` /
+`TALOS_SIGNING_PFX_PASSWORD` with a CA-issued `.pfx`. An **EV** certificate
+(key in an HSM / Azure Key Vault) grants immediate SmartScreen reputation and
+removes the warning; see [docs/04](../docs/04-deployment-distribution.md) §1.
+Note that this script signs the *standalone* exes and the MSI container, not the
+exes *embedded inside* the MSI — fine for the self-signed case; for a trusted
+cert, sign the exes before `wix build` if you also need the installed copies
+signed.
 
 > Production driver signing (WHQL/attestation) and the ELAM/PPL entitlement are
 > Phase 2/0 long-lead items, tracked in

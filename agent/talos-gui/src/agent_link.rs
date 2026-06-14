@@ -115,3 +115,37 @@ pub fn unblock_ip(ip: String) {
         }
     });
 }
+
+/// Ask the agent to restore a quarantined item by id; returns the error string
+/// if the agent rejected it, or `Ok(())` on success.
+pub fn restore_item(id: String) -> Result<(), String> {
+    let endpoint = read_endpoint().ok_or_else(|| "no running agent".to_string())?;
+    match talos_ipc::client::call(&endpoint, Request::Restore { id }) {
+        Ok(talos_ipc::Response::Ack) => Ok(()),
+        Ok(talos_ipc::Response::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected response".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Ask the agent to permanently delete a quarantined item by id.
+pub fn purge_item(id: String) -> Result<(), String> {
+    let endpoint = read_endpoint().ok_or_else(|| "no running agent".to_string())?;
+    match talos_ipc::client::call(&endpoint, Request::Purge { id }) {
+        Ok(talos_ipc::Response::Ack) => Ok(()),
+        Ok(talos_ipc::Response::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected response".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Ask the agent to permanently delete all quarantined items.
+pub fn purge_all() -> Result<(), String> {
+    let endpoint = read_endpoint().ok_or_else(|| "no running agent".to_string())?;
+    match talos_ipc::client::call(&endpoint, Request::PurgeAll) {
+        Ok(talos_ipc::Response::Ack) => Ok(()),
+        Ok(talos_ipc::Response::Error { message }) => Err(message),
+        Ok(_) => Err("unexpected response".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
