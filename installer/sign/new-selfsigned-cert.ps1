@@ -3,13 +3,19 @@
     Mint a persistent self-signed code-signing certificate for Talos releases.
 
 .DESCRIPTION
+    NOTE: The active signing certificate is already provisioned in
+    installer/sign/talos-signing.cer (public cert) and in the repo secrets
+    TALOS_SIGNING_PFX_BASE64 / TALOS_SIGNING_PFX_PASSWORD. Run this script
+    only to ROTATE or REPLACE it (e.g. cert expiry in Jun 2029, or switching
+    to a CA/EV cert — just point the secrets at the new .pfx instead).
+
     Creates a self-signed code-signing cert and exports two files:
       * talos-signing.pfx   private key (password-protected) — used to SIGN
       * talos-signing.cer   public cert — distribute to establish TRUST
     plus talos-signing.pfx.base64, the base64 the release workflow reads.
 
-    Run this ONCE on a trusted machine (Windows PowerShell or pwsh). Keep the
-    .pfx off the repo. Add the two secrets below; every release then signs with
+    Run on a trusted machine (Windows PowerShell or pwsh). Keep the
+    .pfx off the repo. Update the two secrets below; every release then signs with
     this one stable identity instead of a throwaway per-run cert. Push the .cer
     to Trusted Publishers via GPO/Intune to make the signature trusted on your
     managed machines (a self-signed cert is otherwise untrusted, so Windows

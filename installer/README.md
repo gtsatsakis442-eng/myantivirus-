@@ -52,21 +52,29 @@ and the **MSI** (Authenticode, SHA-256, RFC-3161 timestamp):
 pwsh ./installer/sign/sign.ps1 -Mode production -Path talos.exe, talos-agent.msi
 ```
 
-### Free self-signed signing (current default)
+### Self-signed signing (current default)
 
-With no secrets set, releases are signed with a generated **self-signed** cert.
-The binaries carry a `Talos Security` publisher, but Windows still shows
-**"Unknown Publisher"** because the cert isn't from a public CA. To get a
-*stable* identity (same cert across releases) you can trust + push to managed
-machines, mint one once and store it as the two secrets:
+Releases are signed with a **stable self-signed** certificate:
+
+| File | Purpose |
+|---|---|
+| `installer/sign/talos-signing.cer` | Public cert — commit this, push to Trusted Publishers |
+| `TALOS_SIGNING_PFX_BASE64` (repo secret) | Base64 of the `.pfx` private key |
+| `TALOS_SIGNING_PFX_PASSWORD` (repo secret) | PFX password |
+
+The cert was generated with a 3-year validity (expires Jun 2029). Every release
+is signed with the same identity so you can pin the thumbprint in AppLocker/WDAC
+rules. Windows still shows **"Unknown Publisher"** because the cert isn't from a
+public CA. Push `talos-signing.cer` to **Trusted Publishers** via GPO/Intune to
+make the signature trusted on managed machines:
 
 ```powershell
-pwsh ./installer/sign/new-selfsigned-cert.ps1 -Password '<strong-password>'
-# -> talos-signing.pfx (sign), .cer (trust), .pfx.base64 (the secret value)
+# GPO: push the .cer to Trusted Publishers on all endpoints
+certutil -addstore "TrustedPublisher" installer/sign/talos-signing.cer
 ```
 
-Push the exported `.cer` to **Trusted Publishers** via GPO/Intune to make the
-signature trusted on your fleet.
+To rotate or replace the cert, run `installer/sign/new-selfsigned-cert.ps1` and
+update the two secrets.
 
 ### Upgrading to a trusted (CA/EV) certificate
 
