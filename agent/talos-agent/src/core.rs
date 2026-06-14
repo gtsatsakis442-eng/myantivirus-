@@ -217,6 +217,8 @@ impl Shared {
             }
             Request::ListQuarantine => self.list_quarantine(),
             Request::Restore { id } => self.restore(&id),
+            Request::Purge { id } => self.purge(&id),
+            Request::PurgeAll => self.purge_all(),
             Request::SetRealtime { on } => {
                 self.set_realtime(on);
                 self.push_event(
@@ -345,6 +347,43 @@ impl Shared {
                 }
                 Err(e) => Response::Error {
                     message: format!("restore: {e}"),
+                },
+            },
+            Err(e) => Response::Error {
+                message: format!("quarantine: {e}"),
+            },
+        }
+    }
+
+    fn purge(&self, id: &str) -> Response {
+        match Quarantine::open(&self.quarantine_dir) {
+            Ok(store) => match store.purge(id) {
+                Ok(()) => Response::Ack,
+                Err(e) => Response::Error {
+                    message: format!("purge: {e}"),
+                },
+            },
+            Err(e) => Response::Error {
+                message: format!("quarantine: {e}"),
+            },
+        }
+    }
+
+    fn purge_all(&self) -> Response {
+        match Quarantine::open(&self.quarantine_dir) {
+            Ok(store) => match store.purge_all() {
+                Ok(n) => {
+                    if n > 0 {
+                        self.push_event(
+                            severity::INFO,
+                            format!("deleted all {n} quarantined item(s)"),
+                            None,
+                        );
+                    }
+                    Response::Ack
+                }
+                Err(e) => Response::Error {
+                    message: format!("purge_all: {e}"),
                 },
             },
             Err(e) => Response::Error {
