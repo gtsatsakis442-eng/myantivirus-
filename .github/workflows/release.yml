@@ -45,7 +45,7 @@ jobs:
         run: |
           dotnet tool install --global wix --version 5.0.2
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
-          wix extension add WixToolset.Util.wixext/5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
           $m = Select-String -Path Cargo.toml -Pattern '^\s*version\s*=\s*"([^"]+)"' | Select-Object -First 1
           $v = $m.Matches[0].Groups[1].Value
           Write-Host "Building MSI for Talos version: $v"
