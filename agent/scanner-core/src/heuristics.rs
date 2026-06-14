@@ -50,6 +50,9 @@ struct Signals {
     /// Significant data exists beyond the last PE section (overlay). Common in
     /// packers and self-extracting archives, but also in some benign installers.
     anomalous_overlay: bool,
+    /// Compile timestamp is zero (stripped) or past the year-2038 boundary —
+    /// both are implausible for legitimately compiled software today.
+    timestamp_anomaly: bool,
 
     // weight 2 — rare in benign, strong packer/injection indicator
     /// A section is simultaneously writable and executable (W^X violation).
@@ -65,6 +68,14 @@ struct Signals {
     /// legitimate DLL (even pure COM objects are normally signed and trusted
     /// by the Authenticode fast-path above).
     dll_no_exports: bool,
+    /// The DLL has exports but every one is ordinal-only (no symbol names).
+    /// In-memory-only shellcode DLLs commonly use ordinal-only exports to
+    /// make the IAT less obvious to static analysis.
+    dll_ordinal_only_exports: bool,
+    /// The DLL imports functions but none come from kernel32/ntdll/kernelbase.
+    /// Normal DLLs always depend on at least one base library; absence usually
+    /// means the payload resolves Win32 API via direct syscalls to evade hooks.
+    missing_base_imports: bool,
 
     // weight 4 — standalone verdict
     /// An export is named "ReflectiveLoader" or "ReflectiveDllInjection".
@@ -155,29 +166,43 @@ fn signals(pe: &PE, data: &[u8]) -> Signals {
     sig.injection_imports = has_injection_combo(&imports);
     sig.zero_imports = imports.is_empty();
 
-    // --- Export table (DLL-specific checks) ---
+    // --- Export table ---
+    // ReflectiveLoader check applies to any PE (EXE or DLL): some offensive
+    // loaders compile as EXE but still export the bootstrap symbol.
+    sig.reflective_loader_export = pe.exports.iter().any(|e| {
+        e.name
+            .map(|n| {
+                let n = n.to_ascii_lowercase();
+                n.contains("reflectiveloader") || n.contains("reflectivedllinjection")
+            })
+            .unwrap_or(false)
+    });
+
+    // DLL-specific export checks.
     if is_dll {
         sig.dll_no_exports = pe.exports.is_empty();
-        sig.reflective_loader_export = pe.exports.iter().any(|e| {
-            e.name
-                .map(|n| {
-                    let n = n.to_ascii_lowercase();
-                    n.contains("reflectiveloader")
-                        || n.contains("reflectivedllinjection")
-                        || n == "reflectiveloader"
-                })
-                .unwrap_or(false)
-        });
+        // Ordinal-only exports (has entries but none have symbol names) are
+        // common in in-memory shellcode DLLs that want to hide their API surface.
+        if !pe.exports.is_empty() {
+            sig.dll_ordinal_only_exports = pe.exports.iter().all(|e| e.name.is_none());
+        }
+        // A DLL that imports functions but avoids kernel32/ntdll entirely is
+        // using direct syscalls — a strong evasion indicator.
+        if !imports.is_empty() {
+            let has_base = pe.imports.iter().any(|i| {
+                let dll = i.dll.to_ascii_lowercase();
+                dll.contains("kernel32")
+                    || dll.contains("ntdll")
+                    || dll.contains("kernelbase")
+            });
+            sig.missing_base_imports = !has_base;
+        }
     }
 
-    // --- PE timestamp anomaly ---
-    // Timestamp 0 (stripped) or implausibly far in the future is suspicious
-    // when combined with other signals. It contributes via `packed_code` weight
-    // so does not need its own signal field — but we fold it into the
-    // `anomalous_overlay` bit (both weight 1, same policy intent).
+    // --- PE timestamp anomaly (separate signal from overlay) ---
     let ts = pe.header.coff_header.time_date_stamp;
-    if ts == 0 || ts > FUTURE_TIMESTAMP_CUTOFF {
-        sig.anomalous_overlay = true; // reuse the "structural anomaly" slot
+    if !sig.signed && (ts == 0 || ts > FUTURE_TIMESTAMP_CUTOFF) {
+        sig.timestamp_anomaly = true;
     }
 
     sig
@@ -202,6 +227,7 @@ fn findings_for(sig: &Signals) -> Vec<Detection> {
     let items: &[(&str, bool, u32)] = &[
         ("Heuristic.PackedCodeSection", sig.packed_code, 1),
         ("Heuristic.AnomalousOverlay", sig.anomalous_overlay, 1),
+        ("Heuristic.SuspiciousTimestamp", sig.timestamp_anomaly, 1),
         (
             "Heuristic.WritableExecutableSection",
             sig.writable_executable,
@@ -219,6 +245,8 @@ fn findings_for(sig: &Signals) -> Vec<Detection> {
         ),
         ("Heuristic.ZeroImports", sig.zero_imports, 2),
         ("Heuristic.DllNoExports", sig.dll_no_exports, 2),
+        ("Heuristic.DllOrdinalOnlyExports", sig.dll_ordinal_only_exports, 2),
+        ("Heuristic.MissingBaseImports", sig.missing_base_imports, 2),
     ];
 
     let triggered: Vec<(&str, Severity)> = items
@@ -503,5 +531,59 @@ mod tests {
         };
         // 1 + 1 + 2 = 4 >= 3
         assert!(!findings_for(&sig).is_empty());
+    }
+
+    #[test]
+    fn timestamp_anomaly_is_separate_from_overlay() {
+        // Timestamp alone (weight 1) must not fire.
+        let sig = Signals {
+            timestamp_anomaly: true,
+            ..Default::default()
+        };
+        assert!(findings_for(&sig).is_empty(), "timestamp alone is not enough");
+        // Timestamp (1) + injection_imports (2) = 3 — should fire.
+        let sig2 = Signals {
+            timestamp_anomaly: true,
+            injection_imports: true,
+            ..Default::default()
+        };
+        let findings = findings_for(&sig2);
+        assert!(
+            !findings.is_empty(),
+            "timestamp + injection imports must reach threshold"
+        );
+        // The finding name must mention Timestamp, not Overlay.
+        assert!(
+            findings.iter().any(|d| d.name.contains("Timestamp")),
+            "should report SuspiciousTimestamp"
+        );
+    }
+
+    #[test]
+    fn dll_ordinal_only_exports_reaches_threshold() {
+        // ordinal-only (2) + packed_code (1) = 3 >= threshold.
+        let sig = Signals {
+            dll_ordinal_only_exports: true,
+            packed_code: true,
+            ..Default::default()
+        };
+        assert!(
+            !findings_for(&sig).is_empty(),
+            "DLL with ordinal-only exports + packed code must be flagged"
+        );
+    }
+
+    #[test]
+    fn missing_base_imports_reaches_threshold() {
+        // missing_base_imports (2) + anomalous_overlay (1) = 3 >= threshold.
+        let sig = Signals {
+            missing_base_imports: true,
+            anomalous_overlay: true,
+            ..Default::default()
+        };
+        assert!(
+            !findings_for(&sig).is_empty(),
+            "DLL bypassing kernel32/ntdll + overlay must be flagged"
+        );
     }
 }
