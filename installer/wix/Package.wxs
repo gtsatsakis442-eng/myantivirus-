@@ -1,14 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Talos EPP Agent — MSI definition (WiX v4/v5).
+  Talos EPP Agent — MSI definition (WiX v4/v5 + Util extension).
 
-  This is the enterprise deployment artifact (GPO/SCCM/Intune expect an MSI).
   Silent install:
      msiexec /i talos-agent.msi /qn /norestart TENANT_TOKEN=xxx UPDATE_RING=delayed
-  Built in CI on a Windows runner (see .github/workflows/ci.yml); the scanner
-  binary must be compiled to the windows target first.
+  Built in CI on a Windows runner (see .github/workflows/{ci,release}.yml).
+
+  Build locally (from repo root):
+     wix extension add WixToolset.Util.wixext
+     Set-Location installer/wix
+     wix build Package.wxs -ext WixToolset.Util.wixext -d Version=0.13.0 -o talos-agent.msi
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
   <!-- Version is injected at build time from Cargo.toml via
        `wix build -d Version=<v>` (see .github/workflows/{ci,release}.yml).
        The default below keeps a bare `wix build Package.wxs` working and must
@@ -16,6 +21,7 @@
   <?ifndef Version?>
   <?define Version="0.13.0"?>
   <?endif?>
+
   <Package
       Name="Talos EPP Agent"
       Manufacturer="Talos Security"
@@ -25,17 +31,26 @@
       InstallerVersion="500"
       Compressed="yes">
 
-    <SummaryInformation Description="Talos EPP Agent (Phase 1 MVP)" />
+    <SummaryInformation Description="Talos EPP — endpoint protection agent v$(var.Version)" />
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <!-- Major-upgrade logic: stop old version, remove it, install new.
+         ScheduleReinstallMode overrides the default order so old files are
+         removed before new ones are written, preventing locked-file errors. -->
+    <MajorUpgrade
+        Schedule="afterInstallInitialize"
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <!-- Silent-deployment configuration, set via msiexec properties or an MST
-         transform. These flow into HKLM for the agent to read on first run. -->
+    <!-- Silent-deployment configuration, set via msiexec properties or MST
+         transforms. Persisted to HKLM for the agent to read on first check-in. -->
     <Property Id="TENANT_TOKEN" Secure="yes" />
     <Property Id="SERVER" Value="https://cloud.talos.example" Secure="yes" />
     <Property Id="UPDATE_RING" Value="stable" Secure="yes" />
 
+    <!-- ================================================================
+         Directory tree
+         ================================================================ -->
+    <!-- Install tree: %ProgramFiles%\Talos EPP\{signatures\{hashes,yara}} -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Talos EPP">
         <Directory Id="SIGDIR" Name="signatures">
@@ -45,83 +60,164 @@
       </Directory>
     </StandardDirectory>
 
+    <!-- Data tree: %ProgramData%\Talos EPP\{signatures\{hashes,yara},quarantine}
+         Pre-created by the MSI so the service can write here immediately after
+         first start without needing to elevate or race against directory creation. -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAROOTFOLDER" Name="Talos EPP">
+        <Directory Id="DATASTOREDIR" Name="signatures">
+          <Directory Id="DATASTOREHASH" Name="hashes" />
+          <Directory Id="DATASTOREYARA" Name="yara" />
+        </Directory>
+        <Directory Id="QUARANTINEDIR" Name="quarantine" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ================================================================
+         Feature tree
+         ================================================================ -->
     <Feature Id="Main" Title="Talos EPP Agent" Level="1">
       <ComponentGroupRef Id="AgentComponents" />
     </Feature>
 
     <ComponentGroup Id="AgentComponents">
+
+      <!-- ── scanner CLI (talos.exe) ───────────────────────────────── -->
       <Component Directory="INSTALLFOLDER">
         <File Id="ScannerExe"
               Source="$(sys.SOURCEFILEDIR)..\..\target\x86_64-pc-windows-msvc\release\talos.exe"
               KeyPath="yes" />
       </Component>
 
-      <!-- The always-on agent service binary, registered as an auto-start
-           LocalSystem Windows Service that hosts real-time protection, the
-           ransomware canary guard, and OS-firewall C2 blocking. The SCM
-           launches it as `talos-agent.exe service-run`. -->
+      <!-- ── agent service (talos-agent.exe) ──────────────────────── -->
+      <!-- The always-on Windows Service that hosts real-time protection,
+           the ransomware canary guard, OS-firewall C2 blocking, and the
+           IPC channel for the GUI and CLI.  The SCM launches it as
+           `talos-agent.exe service-run`. -->
       <Component Directory="INSTALLFOLDER">
         <File Id="AgentExe"
               Source="$(sys.SOURCEFILEDIR)..\..\target\x86_64-pc-windows-msvc\release\talos-agent.exe"
               KeyPath="yes" />
+
         <ServiceInstall Id="TalosAgentService"
                         Name="TalosAgent"
                         DisplayName="Talos EPP Agent"
-                        Description="Talos EPP endpoint protection agent — real-time on-access scanning with auto-quarantine, ransomware canary guard, and OS-firewall C2 blocking."
+                        Description="Talos EPP endpoint protection — real-time on-access scanning, auto-quarantine, ransomware canary guard, and OS-firewall C2 blocking."
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
                         Arguments="service-run"
                         Account="LocalSystem"
                         Vital="yes" />
+
+        <!-- Delayed auto-start: service runs after the desktop is loaded,
+             reducing impact on boot time without sacrificing protection
+             (the agent is up before any user process can launch malware). -->
+        <util:ServiceConfig
+            ServiceName="TalosAgent"
+            OnInstall="yes"
+            OnReinstall="yes"
+            DelayedAutoStart="yes"
+            FirstFailureActionType="restart"
+            SecondFailureActionType="restart"
+            ThirdFailureActionType="restart"
+            RestartServiceDelayInSeconds="10"
+            ResetPeriodInDays="1" />
+
+        <!-- Wait="yes": MSI blocks until the service fully stops before
+             touching its binary files — prevents ERROR_SHARING_VIOLATION
+             during upgrade and uninstall. -->
         <ServiceControl Id="TalosAgentControl"
                         Name="TalosAgent"
                         Start="install"
                         Stop="both"
                         Remove="uninstall"
-                        Wait="no" />
+                        Wait="yes" />
       </Component>
 
+      <!-- ── desktop GUI (talos-gui.exe) ──────────────────────────── -->
       <Component Directory="INSTALLFOLDER">
         <File Id="GuiExe"
               Source="$(sys.SOURCEFILEDIR)..\..\target\x86_64-pc-windows-msvc\release\talos-gui.exe"
               KeyPath="yes" />
       </Component>
 
+      <!-- ── PATH: add install dir so `talos` and `talos-agent` are  ─ -->
+      <!-- accessible from any command prompt without a full path.     -->
+      <Component Directory="INSTALLFOLDER" Guid="C5E7A9B1-3D5F-7A9C-0B2D-4F6A8C0E2D4F">
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Talos EPP"
+                       Name="PathAdded" Type="integer" Value="1" KeyPath="yes" />
+        <Environment Id="TALOS_PATH" Name="PATH" Value="[INSTALLFOLDER]"
+                     Permanent="no" Part="last" Action="set" System="yes" />
+      </Component>
+
+      <!-- ── Signature files: hash databases ──────────────────────── -->
       <Component Directory="SIGHASH">
         <File Source="$(sys.SOURCEFILEDIR)..\..\signatures\hashes\baseline.hashdb" KeyPath="yes" />
       </Component>
       <Component Directory="SIGHASH">
-        <File Id="TalosHashdb" Source="$(sys.SOURCEFILEDIR)..\..\signatures\hashes\talos.hashdb" KeyPath="yes" />
-      </Component>
-      <Component Directory="SIGYARA">
-        <File Id="EicarYar" Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\eicar.yar" KeyPath="yes" />
-      </Component>
-      <Component Directory="SIGYARA">
-        <File Id="WebshellsYar" Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\webshells.yar" KeyPath="yes" />
-      </Component>
-      <Component Directory="SIGYARA">
-        <File Id="PowershellYar" Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\powershell.yar" KeyPath="yes" />
+        <File Id="TalosHashdb"
+              Source="$(sys.SOURCEFILEDIR)..\..\signatures\hashes\talos.hashdb"
+              KeyPath="yes" />
       </Component>
 
-      <!-- Persist enrollment/config from the silent-install properties so the
-           agent auto-enrolls to the correct tenant on first check-in. -->
+      <!-- ── Signature files: YARA rules (all four rule sets) ─────── -->
+      <Component Directory="SIGYARA">
+        <File Id="EicarYar"
+              Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\eicar.yar"
+              KeyPath="yes" />
+      </Component>
+      <Component Directory="SIGYARA">
+        <File Id="WebshellsYar"
+              Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\webshells.yar"
+              KeyPath="yes" />
+      </Component>
+      <Component Directory="SIGYARA">
+        <File Id="PowershellYar"
+              Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\powershell.yar"
+              KeyPath="yes" />
+      </Component>
+      <Component Directory="SIGYARA">
+        <File Id="OffensiveToolingYar"
+              Source="$(sys.SOURCEFILEDIR)..\..\signatures\yara\offensive_tooling.yar"
+              KeyPath="yes" />
+      </Component>
+
+      <!-- ── Registry: enrollment + install location ───────────────── -->
+      <!-- TenantToken KeyPath keeps this component alive even if the
+           TENANT_TOKEN property was empty at install time (empty-string
+           values are legal). -->
       <Component Directory="INSTALLFOLDER" Guid="A2C4E6F8-1B3D-5F7A-9C0E-2D4F6A8C0E11">
         <RegistryKey Root="HKLM" Key="SOFTWARE\Talos EPP">
-          <RegistryValue Name="TenantToken" Type="string" Value="[TENANT_TOKEN]" KeyPath="yes" />
-          <RegistryValue Name="Server" Type="string" Value="[SERVER]" />
-          <RegistryValue Name="UpdateRing" Type="string" Value="[UPDATE_RING]" />
-          <RegistryValue Name="Version" Type="string" Value="$(var.Version)" />
+          <RegistryValue Name="TenantToken"  Type="string"  Value="[TENANT_TOKEN]" KeyPath="yes" />
+          <RegistryValue Name="Server"       Type="string"  Value="[SERVER]" />
+          <RegistryValue Name="UpdateRing"   Type="string"  Value="[UPDATE_RING]" />
+          <RegistryValue Name="Version"      Type="string"  Value="$(var.Version)" />
+          <!-- InstallPath lets the agent and CLI discover the signatures dir. -->
+          <RegistryValue Name="InstallPath"  Type="string"  Value="[INSTALLFOLDER]" />
+          <!-- DataPath is where the agent writes quarantine/logs/feed updates. -->
+          <RegistryValue Name="DataPath"     Type="string"  Value="[DATAROOTFOLDER]" />
         </RegistryKey>
       </Component>
+
+      <!-- ── ProgramData directory: pre-create the writable store ─── -->
+      <!-- Without this, the service creates the dir on first run but it
+           inherits ProgramData's default ACL (world-readable). Creating it
+           here gives us a chance to tighten it via PermissionEx if needed. -->
+      <Component Directory="DATAROOTFOLDER" Guid="D6F8B0C2-5E7A-9B1D-3F5A-7C9E1B3D5F7A">
+        <CreateFolder />
+        <!-- KeyPath: a dummy value so the component has a stable key. -->
+        <RegistryValue Root="HKLM" Key="SOFTWARE\Talos EPP"
+                       Name="DataDirCreated" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
     </ComponentGroup>
 
     <!--
-      The user-mode TalosAgent service is installed above (ServiceInstall /
-      ServiceControl). Phase 2 hardens it into an anti-malware **PPL**
-      (protected process light) anchored by an **ELAM** driver, and adds the
-      kernel sensor (minifilter / WFP). See docs/01-core-architecture.md and
-      docs/04-deployment-distribution.md.
+      Phase 2 additions (not yet shipping):
+      - Anti-malware PPL (protected process light) with ELAM driver anchor
+      - WFP / minifilter kernel sensor (pre-execution blocking)
+      See docs/01-core-architecture.md and docs/04-deployment-distribution.md.
     -->
   </Package>
 </Wix>
