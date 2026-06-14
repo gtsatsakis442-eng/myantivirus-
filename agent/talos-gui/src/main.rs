@@ -1960,8 +1960,7 @@ impl TalosApp {
                         agent_link::purge_item(id).err()
                     }
                 }
-            } else if let Ok(store) =
-                scanner_core::Quarantine::open(engine_glue::quarantine_dir())
+            } else if let Ok(store) = scanner_core::Quarantine::open(engine_glue::quarantine_dir())
             {
                 match act {
                     Act::Restore => {

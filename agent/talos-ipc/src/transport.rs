@@ -81,9 +81,7 @@ pub fn bind(name: &str) -> io::Result<(Listener, String)> {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(name);
-    let listener = ListenerOptions::new()
-        .name(to_name(name)?)
-        .create_sync()?;
+    let listener = ListenerOptions::new().name(to_name(name)?).create_sync()?;
     listener.set_nonblocking(ListenerNonblockingMode::Accept)?;
     {
         use std::os::unix::fs::PermissionsExt;
