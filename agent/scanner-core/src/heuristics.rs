@@ -191,9 +191,7 @@ fn signals(pe: &PE, data: &[u8]) -> Signals {
         if !imports.is_empty() {
             let has_base = pe.imports.iter().any(|i| {
                 let dll = i.dll.to_ascii_lowercase();
-                dll.contains("kernel32")
-                    || dll.contains("ntdll")
-                    || dll.contains("kernelbase")
+                dll.contains("kernel32") || dll.contains("ntdll") || dll.contains("kernelbase")
             });
             sig.missing_base_imports = !has_base;
         }
@@ -245,7 +243,11 @@ fn findings_for(sig: &Signals) -> Vec<Detection> {
         ),
         ("Heuristic.ZeroImports", sig.zero_imports, 2),
         ("Heuristic.DllNoExports", sig.dll_no_exports, 2),
-        ("Heuristic.DllOrdinalOnlyExports", sig.dll_ordinal_only_exports, 2),
+        (
+            "Heuristic.DllOrdinalOnlyExports",
+            sig.dll_ordinal_only_exports,
+            2,
+        ),
         ("Heuristic.MissingBaseImports", sig.missing_base_imports, 2),
     ];
 
@@ -540,7 +542,10 @@ mod tests {
             timestamp_anomaly: true,
             ..Default::default()
         };
-        assert!(findings_for(&sig).is_empty(), "timestamp alone is not enough");
+        assert!(
+            findings_for(&sig).is_empty(),
+            "timestamp alone is not enough"
+        );
         // Timestamp (1) + injection_imports (2) = 3 — should fire.
         let sig2 = Signals {
             timestamp_anomaly: true,
