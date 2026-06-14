@@ -110,14 +110,15 @@
                         Account="LocalSystem"
                         Vital="yes" />
 
-        <!-- Delayed auto-start: service runs after the desktop is loaded,
-             reducing impact on boot time without sacrificing protection
-             (the agent is up before any user process can launch malware). -->
+        <!-- Failure recovery: if the agent crashes, the SCM restarts it up to
+             three times (10 s apart), resetting the failure counter daily.
+             The service is a plain auto-start service (Start="auto" above) so
+             it comes up early in boot — for an always-on security agent that
+             is preferable to delayed start. (DelayedAutoStart/OnInstall are
+             attributes of the standard ServiceConfig element, not
+             util:ServiceConfig, which handles only failure actions.) -->
         <util:ServiceConfig
             ServiceName="TalosAgent"
-            OnInstall="yes"
-            OnReinstall="yes"
-            DelayedAutoStart="yes"
             FirstFailureActionType="restart"
             SecondFailureActionType="restart"
             ThirdFailureActionType="restart"
