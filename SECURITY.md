@@ -92,8 +92,27 @@ such — we do not present planned controls as if they were active.
   such as `powershell`/`rundll32`/`regsvr32`) is **escalated to isolation**, not
   suppressed.
 - **Heuristic/behavioral findings are corroborated**, not auto-actioned: a
-  *suspicious* verdict requires two or more independent signals, and
-  Authenticode-signed binaries are trusted, to keep false positives low.
+  *suspicious* verdict requires signals whose combined weight reaches a
+  threshold, and Authenticode-signed binaries are fully trusted at this layer
+  to keep false positives low.
+
+#### Detection layers in depth (what is actually shipping)
+
+| Layer | Engine | What it catches |
+|---|---|---|
+| **L1 — Hash** | SHA-256 exact match against `.hashdb` | Known-bad files; always-on even for oversized files |
+| **L2 — YARA** | `yara-x` compiled ruleset | Pattern families: ransomware, stealers, loaders, webshells, packers |
+| **L2 — PE heuristics** | `goblin` PE parser | Packed code (entropy > 7.2), W^X sections, injection import trio, 23 packer section names (UPX/Themida/VMProtect/MPRESS…), anomalous overlay, zero imports, DLL-with-no-exports, `ReflectiveLoader` export (standalone High) |
+| **L2.5 — Behavioral** | Import + string capability inference (CAPA-style) | 25 ATT&CK-tagged patterns: process injection, hollowing, mapped-section injection, token impersonation, driver loading, WMI persistence, UAC bypass, named-pipe C2, DCSync/Kerberoast, registry hive dump, boot-config tamper, LSASS dump, ransomware file-encrypt loop, AMSI/ETW bypass, anti-analysis, keylogging, C2 download, lateral movement, browser credential theft, and more |
+| **L3 — Script analysis** | Lowercased text haystack (handles UTF-16LE) | **Non-PE content only** — PHP/ASP/ASPX webshells (eval on `$_POST`, gzinflate+base64 chain, 9 kit names), VBScript/JScript droppers (ADODB.Stream, WScript.Shell.Run, MSXML2), PowerShell post-exploitation (16 named cmdlets, base64+IEX chain, char-obfuscation), batch destruction (format/del/cipher), Metasploit, Cobalt Strike, Mimikatz, 7 RAT families |
+| **L3 — LOLBin** | String pattern registry | 20+ LOLBin abuse patterns: PowerShell -enc, download cradles, IEX, reflective load, MSHTA, Certutil, Regsvr32, Rundll32, BITSAdmin, MSIExec, InstallUtil, WMIC, Netsh, schtasks, net user, DNSCmd, MavInject |
+| **L4 — Archive** | ZIP unpacking with zip-bomb guard | Infected entries inside `.zip` archives (entry-attributed findings) |
+| **L5 — Realtime** | fanotify (Linux) / ReadDirectoryChangesW (Windows) | On-access interception: each written/executed file scanned by the full pipeline before the process can read it |
+
+All non-PE script content (PowerShell `.ps1`, VBScript `.vbs`, JScript `.js`,
+PHP/ASPX webshells, batch `.bat`) is now processed by **both** the LOLBin
+detector and the script-analysis layer, closing the gap that existed when only
+PE images received dynamic analysis.
 
 ### Secure updates
 
