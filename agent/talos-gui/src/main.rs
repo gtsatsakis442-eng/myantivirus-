@@ -179,6 +179,8 @@ struct TalosApp {
 
     q_items: Vec<scanner_core::QuarantineEntry>,
     q_loaded: bool,
+    /// Two-step guard for the destructive "Delete all" bulk action.
+    confirm_purge_all: bool,
 
     activity: Vec<history::Event>,
     activity_loaded: bool,
@@ -249,6 +251,7 @@ impl TalosApp {
             update_rx: None,
             q_items: Vec::new(),
             q_loaded: false,
+            confirm_purge_all: false,
             activity: Vec::new(),
             activity_loaded: false,
             realtime: None,
@@ -1787,12 +1790,95 @@ impl TalosApp {
         if !self.q_loaded {
             self.reload_quarantine();
         }
+        let count = self.q_items.len();
+        let confirming = self.confirm_purge_all;
+        let mut do_refresh = false;
+        let mut bulk_restore = false;
+        let mut bulk_delete = false;
+        let mut set_confirm: Option<bool> = None;
         ui.horizontal(|ui| {
             if secondary_button(ui, "Refresh").clicked() {
-                self.reload_quarantine();
+                do_refresh = true;
             }
-            ui.label(RichText::new(format!("{} item(s)", self.q_items.len())).color(DIM));
+            ui.label(RichText::new(format!("{count} item(s)")).color(DIM));
+            if count > 0 {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if confirming {
+                        // Destructive: require an explicit confirm click.
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new(format!("CONFIRM — delete all {count}"))
+                                        .color(Color32::WHITE)
+                                        .strong(),
+                                )
+                                .fill(ACCENT),
+                            )
+                            .clicked()
+                        {
+                            bulk_delete = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            set_confirm = Some(false);
+                        }
+                    } else {
+                        if ui
+                            .button(RichText::new("Delete all").color(ACCENT))
+                            .clicked()
+                        {
+                            set_confirm = Some(true);
+                        }
+                        if ui.button("Restore all").clicked() {
+                            bulk_restore = true;
+                        }
+                    }
+                });
+            }
         });
+        // Apply the deferred top-bar actions outside the egui closure.
+        if let Some(v) = set_confirm {
+            self.confirm_purge_all = v;
+        }
+        if do_refresh {
+            self.confirm_purge_all = false;
+            self.reload_quarantine();
+        }
+        if bulk_restore {
+            let ids: Vec<String> = self.q_items.iter().map(|i| i.id.clone()).collect();
+            let (mut ok, mut failed) = (0usize, 0usize);
+            if let Ok(store) = scanner_core::Quarantine::open(engine_glue::quarantine_dir()) {
+                for id in &ids {
+                    match store.restore(id, None) {
+                        Ok(_) => ok += 1,
+                        Err(_) => failed += 1,
+                    }
+                }
+            }
+            history::record(
+                "quarantine",
+                format!("Restored all — {ok} item(s) ({failed} failed)"),
+            );
+            self.status = if failed == 0 {
+                format!("Restored all {ok} item(s) to their original locations.")
+            } else {
+                format!("Restored {ok} item(s); {failed} could not be restored.")
+            };
+            self.confirm_purge_all = false;
+            self.activity_loaded = false;
+            self.reload_quarantine();
+            self.refresh_inventory();
+        }
+        if bulk_delete {
+            let n = scanner_core::Quarantine::open(engine_glue::quarantine_dir())
+                .and_then(|s| s.purge_all())
+                .unwrap_or(0);
+            history::record("quarantine", format!("Deleted all — {n} item(s) purged"));
+            self.status = format!("Deleted all {n} item(s) from quarantine.");
+            self.confirm_purge_all = false;
+            self.activity_loaded = false;
+            self.reload_quarantine();
+            self.refresh_inventory();
+        }
         ui.add_space(6.0);
 
         if self.q_items.is_empty() {
