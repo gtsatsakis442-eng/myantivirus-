@@ -189,8 +189,11 @@ fn match_capabilities(imports: &[String], hay: &str, import_count: usize) -> Vec
 
     // WMI event-subscription persistence: registers a permanent subscription
     // that survives reboots without a Run key.
-    if any_s(&["__eventfilter", "__eventconsumer", "__filtertoconsumerbinding"])
-        && any_s(&["wbem", "cimv2", "root\\subscription", "root/subscription"])
+    if any_s(&[
+        "__eventfilter",
+        "__eventconsumer",
+        "__filtertoconsumerbinding",
+    ]) && any_s(&["wbem", "cimv2", "root\\subscription", "root/subscription"])
     {
         caps.push(Cap {
             name: "Behavior.WmiPersistence",

@@ -456,7 +456,10 @@ mod tests {
         };
         let findings = findings_for(&sig);
         // dll_no_exports (2) + packed_code (1) = 3
-        assert!(!findings.is_empty(), "DLL with no exports + packed code must be flagged");
+        assert!(
+            !findings.is_empty(),
+            "DLL with no exports + packed code must be flagged"
+        );
     }
 
     #[test]

