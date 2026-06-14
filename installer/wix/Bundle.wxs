@@ -13,9 +13,15 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <!-- Version is injected at build time from Cargo.toml via
+       `wix build -d Version=<v>`. The default must track the workspace
+       version in the root Cargo.toml. -->
+  <?ifndef Version?>
+  <?define Version="0.13.0"?>
+  <?endif?>
   <Bundle Name="Talos EPP"
           Manufacturer="Talos Security"
-          Version="0.1.0"
+          Version="$(var.Version)"
           UpgradeCode="C3D5E7F9-2A4B-6C8D-0E1F-3A5B7C9D1E20">
 
     <BootstrapperApplication>

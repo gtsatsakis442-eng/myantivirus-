@@ -9,10 +9,17 @@
   binary must be compiled to the windows target first.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Version is injected at build time from Cargo.toml via
+       `wix build -d Version=<v>` (see .github/workflows/{ci,release}.yml).
+       The default below keeps a bare `wix build Package.wxs` working and must
+       track the workspace version in the root Cargo.toml. -->
+  <?ifndef Version?>
+  <?define Version="0.13.0"?>
+  <?endif?>
   <Package
       Name="Talos EPP Agent"
       Manufacturer="Talos Security"
-      Version="0.12.0"
+      Version="$(var.Version)"
       UpgradeCode="6B5F9C2E-2D1A-4E3B-9C7A-1F2E3D4C5B6A"
       Scope="perMachine"
       InstallerVersion="500"
@@ -104,7 +111,7 @@
           <RegistryValue Name="TenantToken" Type="string" Value="[TENANT_TOKEN]" KeyPath="yes" />
           <RegistryValue Name="Server" Type="string" Value="[SERVER]" />
           <RegistryValue Name="UpdateRing" Type="string" Value="[UPDATE_RING]" />
-          <RegistryValue Name="Version" Type="string" Value="0.12.0" />
+          <RegistryValue Name="Version" Type="string" Value="$(var.Version)" />
         </RegistryKey>
       </Component>
     </ComponentGroup>
