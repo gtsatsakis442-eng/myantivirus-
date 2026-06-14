@@ -86,8 +86,12 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
           wix --version
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+          $m = Select-String -Path Cargo.toml -Pattern '^\s*version\s*=\s*"([^"]+)"' | Select-Object -First 1
+          $v = $m.Matches[0].Groups[1].Value
+          Write-Host "Building MSI for Talos version: $v"
           Set-Location installer/wix
-          wix build Package.wxs -o talos-agent.msi
+          wix build Package.wxs -ext WixToolset.Util.wixext -d Version=$v -o talos-agent.msi
           if (-not (Test-Path talos-agent.msi)) { throw "MSI was not produced" }
 
       - name: Code-signing simulation (app exes)

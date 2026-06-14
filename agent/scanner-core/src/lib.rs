@@ -45,6 +45,7 @@ pub mod ratelimit;
 pub mod realtime;
 pub mod remediation;
 pub mod report;
+pub mod script_analysis;
 pub mod signatures;
 pub mod telemetry;
 pub mod trust;
