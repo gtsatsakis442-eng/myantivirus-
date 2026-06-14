@@ -130,6 +130,154 @@ fn match_capabilities(imports: &[String], hay: &str, import_count: usize) -> Vec
         });
     }
 
+    // Process hollowing: unmap the legitimate image, then inject a replacement.
+    // Requires the same alloc+write+exec trio PLUS the unmap primitive.
+    let hollow = any_imp(&["ntunmapviewofsection", "zwunmapviewofsection"]);
+    if hollow && alloc && write && exec {
+        caps.push(Cap {
+            name: "Behavior.ProcessHollowing",
+            mitre: "T1055.012",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // Memory-mapped file injection: stage code via a shared section object
+    // then flip the region executable.
+    if any_imp(&["createfilemapping", "openfilemapping"])
+        && any_imp(&["mapviewoffile", "ntmapviewofsection"])
+        && any_imp(&["virtualprotect", "ntprotectvirtualmemory"])
+    {
+        caps.push(Cap {
+            name: "Behavior.MappedSectionInjection",
+            mitre: "T1055.015",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // Token impersonation / theft: open a privileged process, steal its token,
+    // and impersonate it.
+    let token_steal = any_imp(&[
+        "impersonateloggedonuser",
+        "setthreadtoken",
+        "duplicatetokenex",
+    ]);
+    if token_steal && any_imp(&["openprocess", "openprocesstoken"]) {
+        caps.push(Cap {
+            name: "Behavior.TokenImpersonation",
+            mitre: "T1134.001",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // Driver / rootkit loading: either direct NT kernel-driver-load API or
+    // a service that drops a .sys file and starts it.
+    if any_imp(&["ntloaddriver", "zwloaddriver"])
+        || (imp("createservice")
+            && any_imp(&["startservice", "scstartservice"])
+            && any_s(&["kernel", "driver", ".sys"]))
+    {
+        caps.push(Cap {
+            name: "Behavior.DriverLoading",
+            mitre: "T1543.003",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // WMI event-subscription persistence: registers a permanent subscription
+    // that survives reboots without a Run key.
+    if any_s(&["__eventfilter", "__eventconsumer", "__filtertoconsumerbinding"])
+        && any_s(&["wbem", "cimv2", "root\\subscription", "root/subscription"])
+    {
+        caps.push(Cap {
+            name: "Behavior.WmiPersistence",
+            mitre: "T1546.003",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // UAC bypass via auto-elevate COM object / ICMLuaUtil / DelegateExecute.
+    if any_s(&[
+        "icmluautil",
+        "ifileoperationmfp",
+        "cmstplua",
+        "delegateexecute",
+        "{3ad05575-8857-4850-9277-11b85bdb8e09}",
+    ]) || (s("autoelevate") && s("true"))
+    {
+        caps.push(Cap {
+            name: "Behavior.UacBypass",
+            mitre: "T1548.002",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // Named-pipe C2: attacker implant listens on a named pipe to receive
+    // commands or tunnel traffic inside the host.
+    if any_imp(&["createnamedpipe", "connectnamedpipe", "peeknamedpipe"])
+        && any_s(&["\\\\.\\pipe\\", "pipe\\"])
+    {
+        caps.push(Cap {
+            name: "Behavior.NamedPipeC2",
+            mitre: "T1071.001",
+            severity: Severity::Medium,
+            weight: 2,
+        });
+    }
+
+    // Kerberos / DCSync / Pass-the-Hash attack (Mimikatz-style).
+    if any_s(&[
+        "sekurlsa::",
+        "lsadump::",
+        "dcsync",
+        "kerberoast",
+        "pth ",
+        "kerberos::ptt",
+        "privilege::debug",
+    ]) {
+        caps.push(Cap {
+            name: "Behavior.KerberosAttack",
+            mitre: "T1558",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // Registry hive dump: reads the raw SAM / SECURITY / SYSTEM hive to
+    // extract credential hashes without touching LSASS.
+    if any_s(&["\\sam", "\\security", "\\system"])
+        && any_s(&["\\config\\", "hklm\\sam", "hklm\\security"])
+        && any_imp(&["regsavekey", "regopenkeyex", "ntsavekeyex"])
+    {
+        caps.push(Cap {
+            name: "Behavior.RegistryHiveDump",
+            mitre: "T1003.002",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
+    // Boot-configuration tampering: disable recovery / safe-boot to impede
+    // remediation (common in ransomware and wipers).
+    if any_s(&[
+        "bootstatuspolicy ignoreallfailures",
+        "bootstatuspolicy ignoreshutdownfailures",
+        "safeboot minimal",
+        "safeboot network",
+    ]) {
+        caps.push(Cap {
+            name: "Behavior.BootConfigTamper",
+            mitre: "T1542.003",
+            severity: Severity::High,
+            weight: 3,
+        });
+    }
+
     // Credential access: LSASS memory dumping.
     if imp("minidumpwritedump") || (s("lsass") && any_imp(&["openprocess", "readprocessmemory"])) {
         caps.push(Cap {

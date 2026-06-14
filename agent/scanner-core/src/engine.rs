@@ -111,17 +111,27 @@ impl Engine {
                     }
                 }
             }
-            // Static heuristics (L2) and behavioral capability analysis (L2.5)
-            // both operate on a parsed PE. Parse it once and share it so a
-            // file's PE structure isn't parsed twice per scan. Non-PE input
-            // simply fails to parse, skipping both layers (a no-op, as before).
+
+            // Static heuristics (L2) and behavioral analysis (L2.5) share a
+            // single PE parse. Non-PE input falls through to script analysis
+            // (L3) instead — so malicious scripts get their own detection path.
             if self.heuristics || self.behavior {
-                if let Ok(pe) = goblin::pe::PE::parse(bytes) {
-                    if self.heuristics {
-                        detections.extend(crate::heuristics::analyze_pe(&pe, bytes));
+                match goblin::pe::PE::parse(bytes) {
+                    Ok(pe) => {
+                        if self.heuristics {
+                            detections.extend(crate::heuristics::analyze_pe(&pe, bytes));
+                        }
+                        if self.behavior {
+                            detections.extend(crate::behavior::analyze_pe(&pe, bytes));
+                        }
                     }
-                    if self.behavior {
-                        detections.extend(crate::behavior::analyze_pe(&pe, bytes));
+                    Err(_) => {
+                        // Not a PE: run script / non-binary content analysis (L3).
+                        // This catches PowerShell loaders, VBScript droppers,
+                        // PHP/ASP/ASPX webshells, and batch wiper scripts.
+                        if self.behavior {
+                            detections.extend(crate::script_analysis::analyze_bytes(bytes));
+                        }
                     }
                 }
             }
