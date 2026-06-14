@@ -52,6 +52,23 @@ jobs:
           Set-Location installer/wix
           wix build Package.wxs -ext WixToolset.Util.wixext -d Version=$v -o talos-agent.msi
 
+      # Sign the exes and the MSI with one certificate so the whole release
+      # shares a single publisher identity. Uses the CA/EV cert from secrets when
+      # present; otherwise falls back to a generated self-signed cert (untrusted
+      # — Windows still shows "Unknown Publisher" until the cert is trusted). See
+      # installer/sign/sign.ps1 and installer/sign/new-selfsigned-cert.ps1.
+      - name: Sign artifacts (exes + MSI)
+        shell: pwsh
+        env:
+          TALOS_SIGNING_PFX_BASE64: ${{ secrets.TALOS_SIGNING_PFX_BASE64 }}
+          TALOS_SIGNING_PFX_PASSWORD: ${{ secrets.TALOS_SIGNING_PFX_PASSWORD }}
+        run: |
+          ./installer/sign/sign.ps1 -Mode production -Path `
+            "target/x86_64-pc-windows-msvc/release/talos.exe", `
+            "target/x86_64-pc-windows-msvc/release/talos-agent.exe", `
+            "target/x86_64-pc-windows-msvc/release/talos-gui.exe", `
+            "installer/wix/talos-agent.msi"
+
       - name: Stage artifacts
         shell: pwsh
         run: |
@@ -60,8 +77,6 @@ jobs:
           Copy-Item target/x86_64-pc-windows-msvc/release/talos.exe dist/talos.exe
           Copy-Item target/x86_64-pc-windows-msvc/release/talos-agent.exe dist/talos-agent.exe
           Copy-Item installer/wix/talos-agent.msi dist/talos-agent.msi
-          # Production signing (EV cert in an HSM) would run here on the hardened
-          # signing host: ./installer/sign/sign.ps1 -Mode production -Path dist/*
 
       - name: Also upload as workflow artifact
         uses: actions/upload-artifact@v4
@@ -108,9 +123,12 @@ jobs:
             reduced heuristic false positives (Authenticode trust + two-signal
             rule). Binaries are self-contained — signatures are embedded.
 
-            > Unsigned build — Windows SmartScreen shows an "Unknown Publisher"
-            > prompt (*More info → Run anyway*) until the EV certificate is applied
-            > (see docs/04-deployment-distribution.md).
+            > Self-signed build — the exes and MSI carry a Talos Authenticode
+            > signature, but because the signing cert isn't from a public CA,
+            > Windows SmartScreen still shows an "Unknown Publisher" prompt
+            > (*More info → Run anyway*) until you trust the certificate or a
+            > CA/EV cert is applied (see docs/04-deployment-distribution.md and
+            > installer/README.md).
 
       - name: Publish rolling "latest" release (main / manual)
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
@@ -135,6 +153,7 @@ jobs:
             Binaries are self-contained (signatures embedded). For a pinned
             version, see the **v${{ steps.ver.outputs.version }}** release.
 
-            > Not production-signed yet — Windows SmartScreen will show an
-            > "Unknown Publisher" prompt (click *More info → Run anyway*) until
-            > the EV certificate is applied (see docs/04-deployment-distribution.md).
+            > Self-signed build — binaries carry a Talos Authenticode signature,
+            > but Windows SmartScreen still shows an "Unknown Publisher" prompt
+            > (click *More info → Run anyway*) until you trust the certificate or
+            > a CA/EV cert is applied (see docs/04-deployment-distribution.md).

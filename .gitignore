@@ -9,6 +9,13 @@
 *.wixobj
 installer/**/obj/
 
+# Code-signing material — NEVER commit private keys (see installer/sign/)
+*.pfx
+*.pfx.base64
+*.cer
+*.pvk
+*.snk
+
 # Python tooling
 __pycache__/
 *.pyc
